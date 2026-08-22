@@ -17,7 +17,7 @@ REGIONS = ["Gdansk", "Gdynia", "Sopot", "Tczew", "Wejherowo"]
 
 technicians = [fake.name() for _ in range(15)]
 
-# Zgłoszenia z CRM
+# CRM tickets
 tasks = []
 for i in range(1, 301):
     tasks.append({
@@ -34,7 +34,7 @@ with open(OUT_DIR / "crm_tasks.csv", "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(tasks)
 
-# Zużycie materiałów z ERP (JSON, per zgłoszenie)
+# Material usage from ERP (JSON, per ticket)
 materials_usage = []
 for task in tasks:
     if random.random() < 0.9:
@@ -48,7 +48,7 @@ for task in tasks:
 with open(OUT_DIR / "erp_materials.json", "w", encoding="utf-8") as f:
     json.dump(materials_usage, f, indent=2, ensure_ascii=False)
 
-# Logi techników
+# Technician logs
 tech_logs = [
     {
         "technician_name": name,
@@ -63,4 +63,4 @@ with open(OUT_DIR / "technician_logs.csv", "w", newline="", encoding="utf-8") as
     writer.writeheader()
     writer.writerows(tech_logs)
 
-print(f"Wygenerowano {len(tasks)} zadań, {len(materials_usage)} zużyć materiałów, {len(tech_logs)} techników.")
+print(f"Generated {len(tasks)} tasks, {len(materials_usage)} material usage records, {len(tech_logs)} technicians.")

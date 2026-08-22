@@ -23,7 +23,7 @@ def test_build_dim_material_deduplicates():
 
 
 def test_build_dim_date_parses_weekday():
-    tasks = [{"task_date": "2026-08-17"}]  # poniedziałek
+    tasks = [{"task_date": "2026-08-17"}]  # Monday
     result = build_dim_date(tasks)
     assert result[0]["year"] == 2026
     assert result[0]["month"] == 8
