@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: telecom_ops_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: telecom_admin
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: telecom_ops
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
