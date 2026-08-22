@@ -12,5 +12,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  app:
+    build: .
+    container_name: telecom_ops_app
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+    volumes:
+      - ./data:/app/data
+
 volumes:
   pgdata:
