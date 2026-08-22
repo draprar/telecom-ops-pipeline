@@ -21,6 +21,7 @@ CREATE TABLE dim_date (
 );
 
 CREATE TABLE fact_work_orders (
+    task_id INT UNIQUE,
     work_order_id SERIAL PRIMARY KEY,
     technician_id INT REFERENCES dim_technician(technician_id),
     material_id INT REFERENCES dim_material(material_id),

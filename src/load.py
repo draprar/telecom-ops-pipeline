@@ -65,11 +65,21 @@ def load_facts(cur, fact_rows, tech_map, material_map, date_map):
         cur.execute(
             """
             INSERT INTO fact_work_orders
-                (technician_id, material_id, date_id, task_type,
-                 duration_minutes, material_quantity, total_cost, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (task_id, technician_id, material_id, date_id, task_type,
+                duration_minutes, material_quantity, total_cost, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (task_id) DO UPDATE SET
+                technician_id = EXCLUDED.technician_id,
+                material_id = EXCLUDED.material_id,
+                date_id = EXCLUDED.date_id,
+                task_type = EXCLUDED.task_type,
+                duration_minutes = EXCLUDED.duration_minutes,
+                material_quantity = EXCLUDED.material_quantity,
+                total_cost = EXCLUDED.total_cost,
+                status = EXCLUDED.status
             """,
             (
+                row["task_id"],
                 tech_map.get(row["technician_name"]),
                 material_map.get(row["material_name"]),
                 date_map.get(row["task_date"]),

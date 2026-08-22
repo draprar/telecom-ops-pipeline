@@ -52,6 +52,7 @@ def build_fact_rows(tasks, materials):
  
         rows.append(
             {
+                "task_id": int(task["task_id"]),
                 "technician_name": task["technician_name"],
                 "material_name": material_name,
                 "task_date": task["task_date"],
