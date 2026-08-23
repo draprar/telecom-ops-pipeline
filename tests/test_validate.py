@@ -1,4 +1,4 @@
-from validate import validate_tasks, validate_materials
+from validate import validate_materials, validate_tasks
 
 
 def make_task(task_id="1", technician_name="Jan Kowalski", duration_minutes="60"):

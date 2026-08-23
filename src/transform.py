@@ -1,5 +1,6 @@
 from datetime import date
 
+
 def build_dim_technician(tech_logs):
     """Build dimension table for technicians"""
     return [{

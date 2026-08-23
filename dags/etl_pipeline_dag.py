@@ -10,16 +10,21 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
-from validate import validate_tasks, validate_materials
-from transform import build_dim_technician, build_dim_material, build_dim_date, build_fact_rows
 from load import (
     get_connection,
-    load_dim_technician,
-    load_dim_material,
-    load_dim_date,
     get_id_maps,
+    load_dim_date,
+    load_dim_material,
+    load_dim_technician,
     load_facts,
 )
+from transform import (
+    build_dim_date,
+    build_dim_material,
+    build_dim_technician,
+    build_fact_rows,
+)
+from validate import validate_materials, validate_tasks
 
 STAGING_ROOT = Path(__file__).resolve().parent.parent / "data" / "staging"
 

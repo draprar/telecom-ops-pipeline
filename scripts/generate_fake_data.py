@@ -2,6 +2,7 @@ import csv
 import json
 import random
 from pathlib import Path
+
 from faker import Faker
 
 fake = Faker("pl_PL")
