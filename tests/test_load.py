@@ -81,6 +81,7 @@ def test_load_facts_maps_ids_and_inserts():
         cur,
         [
             {
+                "task_id": 1,
                 "technician_name": "Jan Kowalski",
                 "material_name": "cable",
                 "task_date": "2026-08-17",
@@ -98,7 +99,7 @@ def test_load_facts_maps_ids_and_inserts():
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO fact_work_orders" in sql
-    assert params == (1, 10, 100, "repair", 60, 2.0, 20.0, "completed")
+    assert params == (1, 1, 10, 100, "repair", 60, 2.0, 20.0, "completed")
 
 
 def test_load_facts_uses_none_for_missing_keys():
@@ -107,6 +108,7 @@ def test_load_facts_uses_none_for_missing_keys():
         cur,
         [
             {
+                "task_id": 1,
                 "technician_name": "Unknown",
                 "material_name": None,
                 "task_date": "2026-08-17",
@@ -123,4 +125,4 @@ def test_load_facts_uses_none_for_missing_keys():
     )
 
     _, params = cur.execute.call_args.args
-    assert params[:3] == (None, None, 100)
+    assert params[:4] == (1, None, None, 100)

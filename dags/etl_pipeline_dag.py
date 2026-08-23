@@ -1,7 +1,7 @@
 import json
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
@@ -124,7 +124,7 @@ def cleanup_task(ti, **kwargs):
 with DAG(
     dag_id="telecom_ops_etl",
     description="Extract-validate-transform-load pipeline for telecom ops data",
-    start_date=datetime(2026, 1, 1),
+    start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
     schedule="@daily",
     catchup=False,
     tags=["etl", "telecom"],

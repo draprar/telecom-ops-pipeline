@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date
 
 def build_dim_technician(tech_logs):
     """Build dimension table for technicians"""
@@ -25,7 +25,7 @@ def build_dim_date(tasks):
     unique_dates = sorted({row["task_date"] for row in tasks})
     dims = []
     for d in unique_dates:
-        dt = datetime.strptime(d, "%Y-%m-%d")
+        dt = date.fromisoformat(d)
         dims.append({
             "full_date": d,
             "year": dt.year,

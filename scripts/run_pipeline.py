@@ -44,7 +44,7 @@ def run():
             load_facts(cur, fact_rows, tech_map, material_map, date_map)
             conn.commit()
             print(f"Data loaded successfully, {len(fact_rows)} fact rows inserted")
-    except Exception as e:
+    except Exception as e: # noqa: BLE001 - guard at the highest level of the script, intentionally wide
         print(f"Error: {e}")
         conn.rollback()
     finally:
