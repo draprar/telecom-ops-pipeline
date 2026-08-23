@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check .
+
+      - name: Run unit tests
+        run: pytest -v
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate synthetic source data
+        run: python scripts/generate_fake_data.py
+
+      - name: Create .env for CI
+        run: cp .env.example .env
+
+      - name: Build and start Postgres + app
+        run: docker compose up --build -d postgres app
+
+      - name: Wait for app container to finish
+        run: docker wait telecom_ops_app
+
+      - name: Show app logs
+        if: always()
+        run: docker logs telecom_ops_app
+
+      - name: Verify data landed in Postgres
+        run: |
+          COUNT=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_orders;")
+          echo "Fact rows loaded: $COUNT"
+          if [ "$COUNT" -lt 1 ]; then
+            echo "No rows loaded - pipeline failed silently"
+            exit 1
+          fi
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

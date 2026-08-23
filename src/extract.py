@@ -2,7 +2,7 @@ import csv
 import json
 from pathlib import Path
 
-RAW_DIR = Path("data/raw")
+RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 
 def load_crm_tasks():
     """Load CRM tasks from CSV file"""

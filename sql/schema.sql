@@ -1,13 +1,13 @@
 CREATE TABLE dim_technician (
     technician_id SERIAL PRIMARY KEY,
-    full_name VARCHAR(100) NOT NULL,
+    full_name VARCHAR(100) NOT NULL UNIQUE,
     region VARCHAR(50),
     hire_date DATE
 );
 
 CREATE TABLE dim_material (
     material_id SERIAL PRIMARY KEY,
-    material_name VARCHAR(100) NOT NULL,
+    material_name VARCHAR(100) NOT NULL UNIQUE,
     unit_cost NUMERIC(10,2)
 );
 
@@ -21,8 +21,8 @@ CREATE TABLE dim_date (
 );
 
 CREATE TABLE fact_work_orders (
-    task_id INT UNIQUE,
     work_order_id SERIAL PRIMARY KEY,
+    task_id INT UNIQUE,
     technician_id INT REFERENCES dim_technician(technician_id),
     material_id INT REFERENCES dim_material(material_id),
     date_id INT REFERENCES dim_date(date_id),
