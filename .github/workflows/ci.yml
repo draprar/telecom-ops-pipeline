@@ -28,6 +28,36 @@ jobs:
       - name: Run unit tests
         run: pytest -v
 
+  dag-validation:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Airflow (constrained, for DAG validation only)
+        run: |
+          pip install "apache-airflow==2.10.4" \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.12.txt"
+
+      - name: Validate DAG loads without errors
+        env:
+          AIRFLOW_HOME: /tmp/airflow
+        run: |
+          python -c "
+          from airflow.models import DagBag
+          bag = DagBag(dag_folder='dags', include_examples=False)
+          assert not bag.import_errors, f'Import errors: {bag.import_errors}'
+          assert 'telecom_ops_etl' in bag.dags, 'DAG telecom_ops_etl not found'
+          dag = bag.dags['telecom_ops_etl']
+          assert len(dag.tasks) == 5, f'Expected 5 tasks, got {len(dag.tasks)}'
+          print('DAG OK — tasks:', [t.task_id for t in dag.tasks])
+          "
+
   integration-test:
     runs-on: ubuntu-latest
     needs: unit-tests
