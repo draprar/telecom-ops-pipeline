@@ -44,6 +44,9 @@ jobs:
           pip install "apache-airflow==2.10.4" \
             --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.12.txt"
 
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+
       - name: Validate DAG loads without errors
         env:
           AIRFLOW_HOME: /tmp/airflow
