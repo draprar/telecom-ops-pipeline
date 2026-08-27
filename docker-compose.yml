@@ -16,7 +16,24 @@ services:
       retries: 5
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      # Schema is now owned by Alembic (see migrations/), not by an initdb
+      # script - the app container applies `alembic upgrade head` on start.
+
+  # One-off: apply migrations without running the full pipeline. Useful when
+  # you only want to bring up Airflow (which does not run migrations itself).
+  #   docker compose run --rm migrate
+  migrate:
+    build: .
+    container_name: telecom_ops_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.example
+    environment:
+      DB_HOST: postgres
+    entrypoint: ["alembic", "upgrade", "head"]
+    profiles: ["tools"]
 
   app:
     build: .
@@ -25,7 +42,7 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.example
     environment:
       DB_HOST: postgres
     volumes:
@@ -38,11 +55,16 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.example
     environment:
       DB_HOST: postgres
       AIRFLOW_HOME: /opt/airflow
-      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv"
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv requests"
+      # Airflow Connection for the pipeline's Postgres access, in URI form,
+      # instead of load.py reading raw env vars. See src/load.py get_connection().
+      AIRFLOW_CONN_TELECOM_OPS_POSTGRES: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      # Optional: set in .env.example to get Slack alerts on task failure (dags/alerts.py).
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     ports:
       - "8080:8080"
     volumes:
