@@ -1,6 +1,2 @@
-Faker
 psycopg2-binary
-pandas
 python-dotenv
-pytest
-ruff==0.16.4

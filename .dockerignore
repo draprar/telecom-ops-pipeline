@@ -4,3 +4,20 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/
+
+# Secrets - must never end up baked into an image layer, even though the
+# app service also gets these via env_file at runtime (that's separate from
+# what's present in the build context).
+.env
+.env.*
+!.env.example
+
+# Not needed by the runtime app image (Dockerfile only COPYs src/ and
+# scripts/), excluding them here too so they're not even sent to the
+# Docker build context.
+tests/
+dags/
+sql/
+.github/
+docker-compose.yml
+README.md
