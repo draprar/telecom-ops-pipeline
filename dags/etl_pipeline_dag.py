@@ -1,4 +1,5 @@
 import json
+import logging
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -25,6 +26,11 @@ from transform import (
     build_fact_rows,
 )
 from validate import validate_materials, validate_tasks
+
+# Do NOT call setup_logging() here - Airflow configures root logging itself
+# and captures per-task output into its own handlers/UI. Using a plain
+# module-level logger lets Airflow own that configuration.
+logger = logging.getLogger(__name__)
 
 STAGING_ROOT = Path(__file__).resolve().parent.parent / "data" / "staging"
 
@@ -65,9 +71,9 @@ def validate_task(ti, **kwargs):
     errors = validate_tasks(tasks) + validate_materials(materials, valid_task_ids)
 
     if errors:
-        print(f"Found {len(errors)} validation issues, e.g.: {errors[:3]}")
+        logger.warning("Found %d validation issue(s), e.g.: %s", len(errors), errors[:3])
     else:
-        print("No validation issues found.")
+        logger.info("No validation issues found.")
 
 
 def transform_task(ti, **kwargs):
@@ -112,7 +118,7 @@ def load_task(ti, **kwargs):
             tech_map, material_map, date_map = get_id_maps(cur)
             load_facts(cur, fact_rows, tech_map, material_map, date_map)
             conn.commit()
-        print(f"Loaded {len(fact_rows)} fact rows.")
+        logger.info("Loaded %d fact rows.", len(fact_rows))
     finally:
         conn.close()
 
@@ -123,7 +129,7 @@ def cleanup_task(ti, **kwargs):
     staging_dir = STAGING_ROOT / ti.run_id
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
-        print(f"Removed staging dir: {staging_dir}")
+        logger.info("Removed staging dir: %s", staging_dir)
 
 
 with DAG(
