@@ -1,5 +1,6 @@
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
@@ -14,6 +15,7 @@ from load import (
     load_facts,
 )
 from logging_config import setup_logging
+from quarantine import split_materials, split_tasks, write_quarantine_file
 from transform import (
     build_dim_date,
     build_dim_material,
@@ -23,6 +25,8 @@ from transform import (
 from validate import validate_materials, validate_tasks
 
 logger = logging.getLogger(__name__)
+
+QUARANTINE_ROOT = Path(__file__).resolve().parent.parent / "data" / "quarantine"
 
 
 def run():
@@ -37,20 +41,33 @@ def run():
 
     logger.info("Validating tasks...")
     valid_task_ids = {t["task_id"] for t in tasks}
-    errors = validate_tasks(tasks) + validate_materials(materials, valid_task_ids)
-    if errors:
-        # NOTE: previously this was print(f"Errors found, e.g.: {errors[:3]}")
-        # missing the f-prefix, so the placeholder never actually got filled in.
-        # Fixed here as part of the switch to logging.
-        logger.warning("Validation found %d issue(s), e.g.: %s", len(errors), errors[:3])
+    task_errors = validate_tasks(tasks)
+    material_errors = validate_materials(materials, valid_task_ids)
+
+    clean_tasks, quarantined_tasks = split_tasks(tasks, task_errors)
+    clean_task_ids = {t["task_id"] for t in clean_tasks}
+    clean_materials, quarantined_materials = split_materials(
+        materials, material_errors, clean_task_ids
+    )
+
+    if quarantined_tasks or quarantined_materials:
+        run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        quarantine_path = QUARANTINE_ROOT / f"{run_timestamp}.json"
+        write_quarantine_file(quarantine_path, quarantined_tasks, quarantined_materials)
+        logger.warning(
+            "Quarantined %d task(s) and %d material row(s); details written to %s",
+            len(quarantined_tasks),
+            len(quarantined_materials),
+            quarantine_path,
+        )
     else:
         logger.info("No validation issues found.")
 
     logger.info("Transforming data...")
     dim_technician_rows = build_dim_technician(tech_logs)
-    dim_material_rows = build_dim_material(materials)
-    dim_date_rows = build_dim_date(tasks)
-    fact_rows = build_fact_rows(tasks, materials)
+    dim_material_rows = build_dim_material(clean_materials)
+    dim_date_rows = build_dim_date(clean_tasks)
+    fact_rows = build_fact_rows(clean_tasks, clean_materials)
 
     logger.info("Loading data into database...")
     conn = get_connection()

@@ -59,7 +59,8 @@ telecom-ops-pipeline/
 │   └── etl_pipeline_dag.py       # Airflow DAG (extract → validate → transform → load → cleanup)
 ├── data/
 │   ├── raw/                      # generated synthetic source files (gitignored)
-│   └── staging/                  # per-run intermediate files used by the DAG (gitignored)
+│   ├── staging/                  # per-run intermediate files used by the DAG (gitignored)
+│   └── quarantine/               # rows that failed validation, kept for review (gitignored)
 ├── scripts/
 │   ├── generate_fake_data.py     # synthetic data generator (Faker)
 │   └── run_pipeline.py           # standalone pipeline runner (used by the Docker app image)
@@ -146,6 +147,17 @@ Every push to `main` runs, via GitHub Actions:
 
 Documented honestly, since these are the kind of trade-offs worth being able to explain out loud:
 
+- **Validation quarantines bad rows instead of blocking the whole run.** A row that fails
+  validation (e.g. a task with a zero `duration_minutes`, or a material pointing at a
+  non-existent task) is set aside in `data/quarantine/<run_id>.json` along with the reason(s)
+  it was flagged, and excluded from that run's load — the rest of the batch still loads
+  normally. This is a deliberate choice over failing the whole pipeline on any validation
+  error: at this data volume, a handful of malformed rows from one source system shouldn't
+  block the other 999 good ones. Quarantining is for row-level *data quality* problems only —
+  systemic failures (unreachable database, missing source file) still raise and stop the
+  pipeline immediately, since those aren't something a quarantine table can fix. If a
+  material's task was itself quarantined, the material cascades into quarantine too, even if
+  it individually passed validation, since it would otherwise have nothing valid to attach to.
 - **One material per fact row.** A work order can use several materials, but `fact_work_orders`
   stores a single `material_id`. Quantity and cost are summed across all materials for that task;
   the "representative" material is just the first one seen. A fully correct model would use a
@@ -162,5 +174,7 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 
 - Bridge table for task↔material instead of the single-material simplification
 - Parquet instead of JSON for staging files
+- Quarantine records in a proper Postgres table instead of JSON files, so they're queryable
+  and can back a simple "data quality" dashboard instead of requiring someone to open a file
 - Kafka producer/consumer to demonstrate event-driven ingestion alongside the batch pipeline
 - dbt for the transformation layer instead of hand-written SQL
