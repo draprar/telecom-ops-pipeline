@@ -17,31 +17,40 @@ def test_valid_tasks_have_no_errors():
 def test_duplicate_task_id_is_detected():
     tasks = [make_task(task_id="1"), make_task(task_id="1")]
     errors = validate_tasks(tasks)
-    assert any("Duplicate" in e for e in errors)
+    assert any(task_id == "1" and "Duplicate" in message for task_id, message in errors)
 
 
 def test_missing_technician_is_detected():
     tasks = [make_task(technician_name="")]
     errors = validate_tasks(tasks)
-    assert any("missing" in e for e in errors)
+    assert any("missing" in message for _task_id, message in errors)
 
 
 def test_invalid_duration_is_detected():
     tasks = [make_task(duration_minutes="0")]
     errors = validate_tasks(tasks)
-    assert any("Invalid duration" in e for e in errors)
+    assert any("Invalid duration" in message for _task_id, message in errors)
 
 
 def test_non_numeric_duration_is_detected():
     tasks = [make_task(duration_minutes="abc")]
     errors = validate_tasks(tasks)
-    assert any("Invalid duration format" in e for e in errors)
+    assert any("Invalid duration format" in message for _task_id, message in errors)
+
+
+def test_errors_are_tagged_with_their_task_id():
+    tasks = [make_task(task_id="42", duration_minutes="0")]
+    errors = validate_tasks(tasks)
+    assert errors == [("42", "Invalid duration for task 42: 0")]
 
 
 def test_material_referencing_unknown_task_is_detected():
     materials = [{"task_id": 99, "material_name": "cable"}]
     errors = validate_materials(materials, valid_task_ids={"1", "2"})
     assert len(errors) == 1
+    task_id, message = errors[0]
+    assert task_id == "99"
+    assert "not found" in message
 
 
 def test_valid_materials_have_no_errors():
