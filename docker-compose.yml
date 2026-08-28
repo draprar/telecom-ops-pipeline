@@ -32,7 +32,11 @@ services:
       - ./data:/app/data
 
   airflow:
-    image: apache/airflow:2.10.4
+    # slim image: no unused providers (Azure/GCP/AWS/...) baked in - ~500MB
+    # vs ~1.1GB for the regular image, and noticeably faster container
+    # startup. Fine here since the DAG only uses plain psycopg2, not any
+    # Airflow provider hook.
+    image: apache/airflow:slim-2.10.4-python3.12
     container_name: telecom_ops_airflow
     depends_on:
       postgres:

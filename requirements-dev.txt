@@ -1,0 +1,10 @@
+# Dev/test/data-generation dependencies only.
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+# NOT installed in the app Docker image - see Dockerfile, which only uses
+# requirements.txt for the runtime image.
+-r requirements.txt
+
+Faker
+pandas
+pytest
+ruff==0.16.4
