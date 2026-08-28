@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -38,7 +39,7 @@ def _stub_pipeline_inputs(monkeypatch, *, validation_errors=None):
     return fact_rows
 
 
-def test_run_pipeline_commits_on_success(monkeypatch, capsys):
+def test_run_pipeline_commits_on_success(monkeypatch, caplog):
     fact_rows = _stub_pipeline_inputs(monkeypatch)
     conn, cur = _connection_with_cursor()
     maps = ({"Jan Kowalski": 1}, {"cable": 10}, {"2026-08-17": 100})
@@ -51,16 +52,17 @@ def test_run_pipeline_commits_on_success(monkeypatch, capsys):
     load_facts = MagicMock()
     monkeypatch.setattr(run_pipeline, "load_facts", load_facts)
 
-    run_pipeline.run()
+    with caplog.at_level(logging.INFO, logger="run_pipeline"):
+        run_pipeline.run()
 
     load_facts.assert_called_once_with(cur, fact_rows, *maps)
     conn.commit.assert_called_once()
     conn.rollback.assert_not_called()
     conn.close.assert_called_once()
-    assert "No errors found" in capsys.readouterr().out
+    assert "No validation issues found" in caplog.text
 
 
-def test_run_pipeline_prints_validation_errors_and_still_loads(monkeypatch, capsys):
+def test_run_pipeline_logs_validation_errors_and_still_loads(monkeypatch, caplog):
     _stub_pipeline_inputs(monkeypatch, validation_errors=["Duplicate task ID found: 1"])
     conn, _cur = _connection_with_cursor()
 
@@ -71,13 +73,15 @@ def test_run_pipeline_prints_validation_errors_and_still_loads(monkeypatch, caps
     monkeypatch.setattr(run_pipeline, "load_dim_date", MagicMock())
     monkeypatch.setattr(run_pipeline, "load_facts", MagicMock())
 
-    run_pipeline.run()
+    with caplog.at_level(logging.INFO, logger="run_pipeline"):
+        run_pipeline.run()
 
     conn.commit.assert_called_once()
-    assert "Errors found" in capsys.readouterr().out
+    assert "Validation found 1 issue(s)" in caplog.text
+    assert any(record.levelname == "WARNING" for record in caplog.records)
 
 
-def test_run_pipeline_rolls_back_on_error(monkeypatch):
+def test_run_pipeline_rolls_back_on_error(monkeypatch, caplog):
     _stub_pipeline_inputs(monkeypatch)
     conn, _cur = _connection_with_cursor()
 
@@ -91,8 +95,10 @@ def test_run_pipeline_rolls_back_on_error(monkeypatch):
         MagicMock(side_effect=RuntimeError("db down")),
     )
 
-    run_pipeline.run()
+    with caplog.at_level(logging.INFO, logger="run_pipeline"):
+        run_pipeline.run()
 
     conn.rollback.assert_called_once()
     conn.commit.assert_not_called()
     conn.close.assert_called_once()
+    assert "Pipeline run failed" in caplog.text
