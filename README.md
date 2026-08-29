@@ -64,8 +64,13 @@ telecom-ops-pipeline/
 ├── scripts/
 │   ├── generate_fake_data.py     # synthetic data generator (Faker)
 │   └── run_pipeline.py           # standalone pipeline runner (used by the Docker app image)
+├── migrations/
+│   ├── env.py                    # builds the DB URL from the same env vars load.py uses
+│   └── versions/                 # one file per schema change, in order
+├── alembic.ini
 ├── sql/
-│   └── schema.sql                # star schema DDL, auto-applied on first Postgres start
+│   └── schema.sql                # historical reference only - not applied automatically
+│                                  # anymore, see migrations/ instead
 ├── src/
 │   ├── extract.py
 │   ├── validate.py
@@ -102,12 +107,36 @@ cp .env.example .env
 # 3. Generate synthetic source data
 python scripts/generate_fake_data.py
 
-# 4. Start the full stack (Postgres + app + Airflow)
+# 4. Start the full stack (Postgres + migrate + app + Airflow)
 docker-compose up --build -d
 ```
 
-Postgres schema is created automatically on first start (via `docker-entrypoint-initdb.d`) — no
-manual migration step needed on a fresh setup.
+The `migrate` service runs `alembic upgrade head` against Postgres and exits; `app` and `airflow`
+both wait for it to finish successfully (`depends_on: migrate: condition: service_completed_successfully`)
+before starting, so the schema always exists before anything tries to use it — on a fresh database
+just as much as on one that already has data from a previous version of the schema.
+
+## Managing schema changes
+
+Schema changes go through Alembic, not hand-edited SQL. To make a change:
+
+```bash
+# 1. Write a new revision (autogenerate won't find anything - there are no
+#    ORM models in this project, load.py uses raw SQL - so write upgrade()/
+#    downgrade() by hand)
+alembic revision -m "describe the change"
+
+# 2. Edit the generated file in migrations/versions/, then apply it
+alembic upgrade head
+
+# 3. Sanity-check you can also undo it
+alembic downgrade -1
+alembic upgrade head
+```
+
+`migrations/env.py` builds the connection URL from the same `DB_HOST` / `POSTGRES_*` environment
+variables `load.py` already uses, so there's nothing extra to configure locally beyond the usual
+`.env`.
 
 ## Running the pipeline
 
@@ -158,6 +187,16 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   pipeline immediately, since those aren't something a quarantine table can fix. If a
   material's task was itself quarantined, the material cascades into quarantine too, even if
   it individually passed validation, since it would otherwise have nothing valid to attach to.
+- **Schema changes go through Alembic, with real "before/after" migrations.** The very first
+  version of `fact_work_orders.task_id` had no `UNIQUE` constraint, which was added later by hand
+  via `psql` once the upsert logic in `load_facts()` needed something to `ON CONFLICT` against —
+  and that fix only ever got folded into `sql/schema.sql` as the new "final" state, with no
+  record of how to get an *existing*, already-populated database from the old shape to the new
+  one. `migrations/versions/` now reproduces that exact history as two migrations: `0001` creates
+  the original schema (no constraint), `0002` adds it — rather than one migration that already
+  has the fix baked in. This was verified against a real Postgres instance with data already
+  inserted under the old schema: `alembic upgrade head` added the constraint without touching the
+  existing rows, which is the actual point of a migration tool over a "current state" SQL file.
 - **One material per fact row.** A work order can use several materials, but `fact_work_orders`
   stores a single `material_id`. Quantity and cost are summed across all materials for that task;
   the "representative" material is just the first one seen. A fully correct model would use a
