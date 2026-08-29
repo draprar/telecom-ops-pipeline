@@ -16,7 +16,27 @@ services:
       retries: 5
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      # No more docker-entrypoint-initdb.d/schema.sql here - schema is now
+      # owned by Alembic (see the `migrate` service below). sql/schema.sql
+      # is kept only as a historical reference of the final shape; it is
+      # not applied automatically anymore. Mounting both would fail on a
+      # fresh database anyway (schema.sql creates the tables, then Alembic
+      # would try to create them again and hit "relation already exists").
+
+  migrate:
+    # Same image as `app` - just runs `alembic upgrade head` instead of the
+    # pipeline. One image, two jobs, instead of maintaining a second image
+    # solely to run migrations.
+    build: .
+    container_name: telecom_ops_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+    command: ["alembic", "upgrade", "head"]
 
   app:
     build: .
@@ -24,6 +44,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -41,6 +63,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:

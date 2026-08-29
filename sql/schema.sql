@@ -1,3 +1,14 @@
+-- HISTORICAL REFERENCE ONLY.
+--
+-- This file is no longer applied automatically. It used to be mounted into
+-- Postgres's docker-entrypoint-initdb.d/ and run on first container start,
+-- but schema creation and changes are now owned by Alembic - see
+-- migrations/versions/ and the `migrate` service in docker-compose.yml.
+--
+-- Kept here only as a single-file snapshot of the current ("head") schema
+-- shape, for quick reference without having to read through every
+-- migration file to reconstruct it.
+
 CREATE TABLE dim_technician (
     technician_id SERIAL PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL UNIQUE,

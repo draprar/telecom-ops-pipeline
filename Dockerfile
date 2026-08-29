@@ -27,8 +27,15 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Only what the app actually needs at runtime - not tests/, dags/, sql/,
 # docker-compose.yml, README.md, etc. Keeps the image lean and means a
 # change to, say, the DAG file doesn't invalidate this image's layers.
+#
+# alembic.ini + migrations/ are included because this same image doubles
+# as the "migrate" service in docker-compose.yml (command overridden to
+# `alembic upgrade head` there) - one image, two jobs, instead of
+# maintaining a second image just to run migrations.
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser scripts/ ./scripts/
+COPY --chown=appuser:appuser alembic.ini .
+COPY --chown=appuser:appuser migrations/ ./migrations/
 
 USER appuser
 
