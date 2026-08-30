@@ -9,10 +9,10 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
 from load import (
-    get_connection,
     get_id_maps,
     load_dim_date,
     load_dim_material,
@@ -36,6 +36,13 @@ STAGING_ROOT = Path(__file__).resolve().parent.parent / "data" / "staging"
 # Deliberately OUTSIDE the staging dir: cleanup_task deletes the staging dir
 # after every run, but quarantine records need to survive for manual review.
 QUARANTINE_ROOT = Path(__file__).resolve().parent.parent / "data" / "quarantine"
+
+# The Connection with this ID is defined via the AIRFLOW_CONN_POSTGRES_DEFAULT
+# env var in docker-compose.yml, not via os.getenv()/load.py like the
+# standalone scripts/run_pipeline.py uses. See load_task() below and the
+# README for why the DAG and the standalone script deliberately connect to
+# Postgres two different ways.
+POSTGRES_CONN_ID = "postgres_default"
 
 
 def _staging_dir(run_id: str) -> Path:
@@ -141,7 +148,13 @@ def load_task(ti, **kwargs):
     dim_date_rows = _read_json(ti.xcom_pull(key="dim_date_path", task_ids="transform"))
     fact_rows = _read_json(ti.xcom_pull(key="fact_rows_path", task_ids="transform"))
 
-    conn = get_connection()
+    # Airflow-native connection lookup instead of os.getenv()/load_dotenv():
+    # the credentials live in an Airflow Connection (here defined via the
+    # AIRFLOW_CONN_POSTGRES_DEFAULT env var, see docker-compose.yml), which
+    # is what Airflow itself considers the "correct" place for this instead
+    # of an ad-hoc .env read inside task code.
+    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    conn = hook.get_conn()
     try:
         with conn.cursor() as cur:
             load_dim_technician(cur, dim_technician_rows)

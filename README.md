@@ -205,6 +205,18 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   files rather than through XCom directly, to avoid XCom's size limits — a real pattern for
   larger datasets. At this data volume, Parquet would be the natural next upgrade (smaller files,
   preserved types) but wasn't necessary to prove the pattern.
+- **The DAG and the standalone script connect to Postgres two different ways, on purpose.**
+  `dags/etl_pipeline_dag.py`'s `load_task` uses `PostgresHook(postgres_conn_id="postgres_default")`
+  — Airflow's own mechanism for looking up database credentials by a Connection ID, rather than
+  reading them from `.env` inside task code. `scripts/run_pipeline.py`, which runs standalone
+  outside Airflow (e.g. via the `app` container), keeps using `load.py`'s `get_connection()` /
+  `os.getenv()` — Airflow Connections simply don't exist outside of Airflow, so there's nothing
+  "more correct" to switch it to. The Connection itself is defined via the
+  `AIRFLOW_CONN_POSTGRES_DEFAULT` environment variable in `docker-compose.yml` rather than created
+  by hand in the UI or via `airflow connections add` — the honest trade-off here is that an
+  env-var Connection isn't a row in the metadata DB, so it isn't editable from the Connections
+  page the way a UI-created one is; changing it means changing the env var (and restarting the
+  container), not touching DAG code either way, which was the actual goal.
 - **Airflow in standalone mode.** Uses SQLite metadata storage and a sequential executor —
   intentionally lightweight for local development, not representative of a production Airflow
   deployment (which would use PostgreSQL/MySQL for metadata and CeleryExecutor or KubernetesExecutor).

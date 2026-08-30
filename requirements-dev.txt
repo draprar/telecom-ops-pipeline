@@ -8,3 +8,18 @@ Faker
 pandas
 pytest
 ruff==0.16.4
+
+# Only needed so the CI dag-validation job (which imports the DAG module
+# directly to check for import errors) can resolve
+# `from airflow.providers.postgres.hooks.postgres import PostgresHook`.
+# The actual Airflow container gets this the same way it already gets
+# psycopg2-binary/python-dotenv: via _PIP_ADDITIONAL_REQUIREMENTS in
+# docker-compose.yml, not from this file.
+#
+# PINNED, unlike most of this file: an unpinned install here previously
+# pulled in provider 7.0.2, which requires apache-airflow>=3.0 and silently
+# upgraded core airflow from the pinned 2.10.4 to 3.3.1 during CI's second
+# pip install step - breaking the whole point of installing airflow with
+# --constraint in the first place. 5.14.0 matches what's already pinned in
+# Airflow 2.10.4's own constraints file, so it can't force that upgrade.
+apache-airflow-providers-postgres==5.14.0
