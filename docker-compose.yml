@@ -56,8 +56,8 @@ services:
   airflow:
     # slim image: no unused providers (Azure/GCP/AWS/...) baked in - ~500MB
     # vs ~1.1GB for the regular image, and noticeably faster container
-    # startup. Fine here since the DAG only uses plain psycopg2, not any
-    # Airflow provider hook.
+    # startup. apache-airflow-providers-postgres is added explicitly below
+    # since slim ships with none of the database providers.
     image: apache/airflow:slim-2.10.4-python3.12
     container_name: telecom_ops_airflow
     depends_on:
@@ -70,7 +70,16 @@ services:
     environment:
       DB_HOST: postgres
       AIRFLOW_HOME: /opt/airflow
-      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv"
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv apache-airflow-providers-postgres==5.14.0"
+      # Airflow-native Connection for the DAG's load_task, instead of the
+      # os.getenv()/.env read that scripts/run_pipeline.py still uses. This
+      # is the standard env-var form of a Connection - Airflow resolves it
+      # by ID (postgres_default) exactly like one created in the UI. The
+      # honest trade-off: unlike a UI/CLI-created Connection, this one is
+      # not a row in the metadata DB, so it's not editable from the
+      # Connections page - changing it means changing this env var (and
+      # restarting the container), not touching DAG code either way.
+      AIRFLOW_CONN_POSTGRES_DEFAULT: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${DB_PORT}/${POSTGRES_DB}"
     ports:
       - "8080:8080"
     volumes:
