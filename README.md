@@ -74,8 +74,11 @@ telecom-ops-pipeline/
 ├── src/
 │   ├── extract.py
 │   ├── validate.py
+│   ├── quarantine.py
 │   ├── transform.py
-│   └── load.py
+│   ├── load.py
+│   ├── logging_config.py
+│   └── alerting.py               # posts to a chat webhook on task failure (on_failure_callback)
 ├── tests/
 ├── docker-compose.yml            # postgres + app + airflow services
 ├── Dockerfile                    # app image
@@ -154,6 +157,24 @@ docker logs telecom_ops_app
 Both paths are idempotent — running either one multiple times on the same source data updates
 existing rows (matched by `task_id`) instead of duplicating them.
 
+## Alerting
+
+Failure notifications are off by default. To turn them on:
+
+1. Create a webhook — for Discord: server settings → Integrations → Webhooks → New Webhook, copy
+   the URL. For Slack: create an app at [api.slack.com/apps](https://api.slack.com/apps), enable
+   Incoming Webhooks, install it to your workspace.
+2. Add to `.env`:
+   ```
+   ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
+   ALERT_WEBHOOK_TYPE=discord   # or "slack"
+   ```
+3. Restart the `airflow` container. Any task failure in `telecom_ops_etl` now posts to that
+   webhook — DAG id, task id, run id, the exception, and a link straight to the task's logs.
+
+Without `ALERT_WEBHOOK_URL` set, the DAG behaves exactly as before — `notify_on_failure()` logs
+that it's skipping and returns, nothing else changes.
+
 ## Testing
 
 ```bash
@@ -220,6 +241,17 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 - **Airflow in standalone mode.** Uses SQLite metadata storage and a sequential executor —
   intentionally lightweight for local development, not representative of a production Airflow
   deployment (which would use PostgreSQL/MySQL for metadata and CeleryExecutor or KubernetesExecutor).
+- **Failure alerts go to a chat webhook, via `on_failure_callback`.** Set via `default_args` on
+  the DAG, so it applies to every task, not just one — if the DAG fails unattended (e.g. at 3am),
+  `src/alerting.py` posts to whatever webhook `ALERT_WEBHOOK_URL` points at (Discord by default;
+  `ALERT_WEBHOOK_TYPE=slack` switches the payload shape) instead of the failure only being
+  noticed the next time someone happens to open the Airflow UI. Deliberately not email: Airflow
+  standalone has no SMTP server configured, and adding one is a real chunk of extra infrastructure
+  (a real mail relay or third-party SMTP credentials) for what a single webhook URL already
+  covers. The alert path is defensive on purpose — every exception inside `notify_on_failure()` is
+  caught and logged, never re-raised, since a broken webhook must never make the DAG's own failure
+  handling fail further. Verified against a real Airflow task failure locally (`airflow tasks test`
+  with a deliberately unreachable database), not just with a mocked HTTP call in the unit tests.
 
 ## Possible next steps
 
@@ -228,4 +260,5 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 - Quarantine records in a proper Postgres table instead of JSON files, so they're queryable
   and can back a simple "data quality" dashboard instead of requiring someone to open a file
 - Kafka producer/consumer to demonstrate event-driven ingestion alongside the batch pipeline
+- Email alerting alongside (or instead of) the webhook, once a real SMTP relay is available
 - dbt for the transformation layer instead of hand-written SQL
