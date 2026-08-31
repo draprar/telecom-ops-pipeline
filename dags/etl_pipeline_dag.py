@@ -11,6 +11,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
+from alerting import notify_on_failure
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
 from load import (
     get_id_maps,
@@ -186,6 +187,10 @@ with DAG(
     schedule="@daily",
     catchup=False,
     tags=["etl", "telecom"],
+    # Applies to every task below: if ANY of them fails (at 3am, unattended),
+    # notify_on_failure() posts to the webhook configured via ALERT_WEBHOOK_URL
+    # instead of the failure only being visible next time someone opens the UI.
+    default_args={"on_failure_callback": notify_on_failure},
 ) as dag:
 
     extract = PythonOperator(task_id="extract", python_callable=extract_task)
