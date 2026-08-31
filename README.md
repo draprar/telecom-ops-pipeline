@@ -9,7 +9,8 @@ and loaded into PostgreSQL. Orchestrated with Airflow, tested with pytest, linte
 verified end-to-end on every push via GitHub Actions.
 
 Built as a hands-on portfolio project to practice the exact stack required for a Data Engineer role:
-SQL, Python, PostgreSQL, Docker, Git, ETL/ELT, DWH modeling, Airflow orchestration, and CI/CD.
+SQL, Python, PostgreSQL, Docker, Git, ETL/ELT, DWH modeling, schema migrations, Airflow
+orchestration, and CI/CD.
 
 ## Architecture
 
@@ -48,6 +49,7 @@ flowchart LR
 | Orchestration | Apache Airflow 2.10 (standalone mode) |
 | Testing | pytest |
 | Linting | ruff |
+| Schema migrations | Alembic |
 | CI/CD | GitHub Actions |
 
 ## Project structure
@@ -80,7 +82,7 @@ telecom-ops-pipeline/
 │   ├── logging_config.py
 │   └── alerting.py               # posts to a chat webhook on task failure (on_failure_callback)
 ├── tests/
-├── docker-compose.yml            # postgres + app + airflow services
+├── docker-compose.yml            # postgres + migrate + app + airflow services
 ├── Dockerfile                    # app image
 ├── requirements.txt
 └── .env.example
@@ -102,8 +104,13 @@ Star schema: one fact table, three dimensions.
 # 1. Set up Python environment
 python -m venv venv
 .\venv\Scripts\activate        # Windows
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
+```
+`requirements-dev.txt` pulls in `requirements.txt` too, plus `Faker` (needed by
+`scripts/generate_fake_data.py` in step 3), `pytest`, and `ruff`. The Docker image itself only
+ever installs the runtime-only `requirements.txt` — see the Dockerfile.
 
+```bash
 # 2. Copy env template
 cp .env.example .env
 
