@@ -9,6 +9,8 @@ they never raise. This is documented in README under "Design decisions &
 known simplifications".
 """
 
+from validate import task_id_label
+
 SOURCE_CRM_TASKS = "crm_tasks"
 SOURCE_ERP_MATERIALS = "erp_materials"
 
@@ -26,9 +28,9 @@ def split_tasks(tasks, task_errors):
 
     clean, quarantined = [], []
     for row in tasks:
-        task_id = row["task_id"]
-        if task_id in errors_by_task:
-            quarantined.append({"record": row, "errors": errors_by_task[task_id]})
+        row_key = task_id_label(row)
+        if row_key in errors_by_task:
+            quarantined.append({"record": row, "errors": errors_by_task[row_key]})
         else:
             clean.append(row)
     return clean, quarantined

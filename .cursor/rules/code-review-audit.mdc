@@ -11,7 +11,7 @@ Jeśli README lub kod są nowsze niż ta checklista, **zaktualizuj regułę albo
 
 # Zanim zaczniesz
 
-Przeczytaj całe `README.md`, zwłaszcza **"Design decisions & known simplifications"**. Świadome kompromisy (kwarantanna zamiast fail-fast, dwuetapowy Alembic, jeden materiał na fakt, JSON staging, Hook vs `.env`, Airflow standalone, webhook z wąskim `except` na ścieżce wysyłki) **nie są błędami**. Pokrycie z kompromisem → pomiń albo jedna linia w "Potwierdzone znane ograniczenia", nigdy Findings.
+Przeczytaj całe `README.md`, zwłaszcza **"Design decisions & known simplifications"**. Świadome kompromisy (kwarantanna zamiast fail-fast, dwuetapowy Alembic, mostek materiałów `fact_work_order_materials`, Parquet staging, last-good upsert faktów, Hook vs `.env`, Airflow standalone, webhook z wąskim `except` na ścieżce wysyłki) **nie są błędami**. Pokrycie z kompromisem → pomiń albo jedna linia w "Potwierdzone znane ograniczenia", nigdy Findings.
 
 # Zakres
 

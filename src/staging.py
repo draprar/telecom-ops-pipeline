@@ -28,11 +28,17 @@ def write_rows(path: Path, rows: list[dict]) -> str:
     return str(path)
 
 
+def _require_staging_file(path_str: str) -> Path:
+    """Return the staging path or raise if a DAG handoff file is missing."""
+    path = Path(path_str)
+    if not path.exists():
+        raise FileNotFoundError(f"Staging file not found: {path}")
+    return path
+
+
 def read_rows(path_str: str) -> list[dict]:
     """Read flat dict rows written by write_rows()."""
-    if not Path(path_str).exists():
-        return []
-    return pq.read_table(path_str).to_pylist()
+    return pq.read_table(_require_staging_file(path_str)).to_pylist()
 
 
 def write_quarantine_entries(path: Path, entries: list[dict]) -> str:
@@ -55,9 +61,7 @@ def write_quarantine_entries(path: Path, entries: list[dict]) -> str:
 
 def read_quarantine_entries(path_str: str) -> list[dict]:
     """Rebuild quarantine entry dicts from write_quarantine_entries()."""
-    if not Path(path_str).exists():
-        return []
-    rows = pq.read_table(path_str).to_pylist()
+    rows = pq.read_table(_require_staging_file(path_str)).to_pylist()
     return [
         {
             "record": json.loads(row["record_json"]),

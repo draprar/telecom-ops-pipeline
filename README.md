@@ -168,7 +168,11 @@ docker logs telecom_ops_app
 3. Enable and trigger the `telecom_ops_etl` DAG
 
 Both paths are idempotent — running either one multiple times on the same source data updates
-existing rows (matched by `task_id`) instead of duplicating them.
+existing rows (matched by `task_id`) instead of duplicating them. That upsert is a **last-good**
+contract: a task quarantined in this run is excluded from the load but does not delete a fact
+row loaded on a previous successful run, and a task absent from the source file is left in place
+too. A full source snapshot with delete-on-absence would need an explicit completeness gate and
+is intentionally out of scope here.
 
 ## Alerting
 
@@ -194,10 +198,12 @@ that it's skipping and returns, nothing else changes.
 pytest -v
 ```
 
-Unit tests cover `extract`, `validate`, `transform`, and `load` in isolation (no live database
-required). CI additionally runs a full integration test: builds the app image, starts Postgres,
-runs the real pipeline against a fresh database, and asserts that rows actually landed in
-`fact_work_orders`.
+Unit tests cover `extract`, `validate`, `transform`, `load`, `quarantine`, `pipeline`
+(validate/split orchestration), `staging` (Parquet handoffs), and `alerting` in isolation — no
+live database required. CI additionally runs **`dag-validation`** (DAG import and task graph)
+and a full **`integration-test`**: builds the app image, starts Postgres, runs the real pipeline
+against a fresh database, asserts row counts in facts and material lines, and re-runs the
+pipeline to verify upsert did not duplicate rows.
 
 ## CI/CD
 
@@ -258,9 +264,12 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 - **Parquet staging files between Airflow tasks, not XCom payloads.** The DAG passes
   file paths through XCom and writes row batches to `data/staging/<run_id>/*.parquet`
   via `src/staging.py` (pyarrow). That avoids XCom size limits and keeps column types
-  intact compared to JSON. The standalone `scripts/run_pipeline.py` path stays in-memory
-  — it does not need staging files at this volume. `pyarrow` ships in `requirements.txt`
-  and in the Airflow container via `_PIP_ADDITIONAL_REQUIREMENTS` in `docker-compose.yml`.
+  intact compared to JSON. An empty batch is a valid handoff (`write_rows([], …)` writes
+  a zero-row Parquet file); a missing staging file on read is a systemic failure and
+  raises `FileNotFoundError`, same as a missing raw source file in extract. The
+  standalone `scripts/run_pipeline.py` path stays in-memory — it does not need staging
+  files at this volume. `pyarrow` ships in `requirements.txt` and in the Airflow container
+  via `_PIP_ADDITIONAL_REQUIREMENTS` in `docker-compose.yml`.
 - **The DAG and the standalone script connect to Postgres two different ways, on purpose.**
   `dags/etl_pipeline_dag.py`'s `load_task` uses `PostgresHook(postgres_conn_id="postgres_default")`
   — Airflow's own mechanism for looking up database credentials by a Connection ID, rather than

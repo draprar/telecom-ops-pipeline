@@ -1,4 +1,5 @@
 import pyarrow.parquet as pq
+import pytest
 
 from staging import (
     read_quarantine_entries,
@@ -26,8 +27,14 @@ def test_write_read_rows_empty_list(tmp_path):
     assert read_rows(str(path)) == []
 
 
-def test_read_rows_missing_file_returns_empty_list(tmp_path):
-    assert read_rows(str(tmp_path / "missing.parquet")) == []
+def test_read_rows_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Staging file not found"):
+        read_rows(str(tmp_path / "missing.parquet"))
+
+
+def test_read_quarantine_entries_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Staging file not found"):
+        read_quarantine_entries(str(tmp_path / "missing.parquet"))
 
 
 def test_quarantine_entries_roundtrip(tmp_path):

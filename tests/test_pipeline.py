@@ -76,6 +76,31 @@ def test_split_extracted_quarantines_unknown_technician():
     assert q_materials[0]["errors"]
 
 
+def test_split_extracted_quarantines_bad_task_id_without_keyerror():
+    tasks = [
+        {
+            "technician_name": "Jan Kowalski",
+            "duration_minutes": "60",
+            "task_date": "2026-08-17",
+            "task_type": "repair",
+            "status": "completed",
+        }
+    ]
+    materials = []
+    tech_logs = [
+        {"technician_name": "Jan Kowalski", "region": "Gdansk", "hire_date": "2020-01-01"}
+    ]
+
+    clean_tasks, clean_materials, q_tasks, _q_materials = split_extracted(
+        tasks, materials, tech_logs
+    )
+
+    assert clean_tasks == []
+    assert clean_materials == []
+    assert len(q_tasks) == 1
+    assert any("Missing field task_id" in message for message in q_tasks[0]["errors"])
+
+
 def test_log_quarantine_summary_when_empty(caplog):
     with caplog.at_level(logging.INFO, logger="pipeline"):
         log_quarantine_summary([], [])
