@@ -113,10 +113,13 @@ def test_build_warehouse_rows_delegates_to_transform():
         {"technician_name": "Jan Kowalski", "region": "Gdansk", "hire_date": "2020-01-01"}
     ]
 
-    dim_tech, dim_mat, dim_date, facts = build_warehouse_rows(tasks, materials, tech_logs)
+    dim_tech, dim_mat, dim_date, facts, lines = build_warehouse_rows(
+        tasks, materials, tech_logs
+    )
 
     assert dim_tech[0]["full_name"] == "Jan Kowalski"
     assert dim_mat[0]["material_name"] == "cable"
     assert dim_date[0]["full_date"] == "2026-08-17"
     assert facts[0]["task_id"] == 1
-    assert facts[0]["total_cost"] == 20.0
+    assert "total_cost" not in facts[0]
+    assert lines[0]["line_cost"] == 20.0

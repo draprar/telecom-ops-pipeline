@@ -35,8 +35,8 @@ def run():
     )
 
     logger.info("Transforming data...")
-    dim_technician_rows, dim_material_rows, dim_date_rows, fact_rows = build_warehouse_rows(
-        clean_tasks, clean_materials, tech_logs
+    dim_technician_rows, dim_material_rows, dim_date_rows, fact_rows, material_lines = (
+        build_warehouse_rows(clean_tasks, clean_materials, tech_logs)
     )
 
     logger.info("Loading data into database...")
@@ -48,8 +48,13 @@ def run():
             dim_material_rows,
             dim_date_rows,
             fact_rows,
+            material_lines,
         )
-        logger.info("Data loaded successfully, %d fact rows inserted", len(fact_rows))
+        logger.info(
+            "Data loaded successfully, %d fact rows and %d material lines inserted",
+            len(fact_rows),
+            len(material_lines),
+        )
     except Exception:
         logger.exception("Pipeline run failed, rolling back")
         raise

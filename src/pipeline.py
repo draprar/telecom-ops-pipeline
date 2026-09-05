@@ -14,6 +14,7 @@ from transform import (
     build_dim_material,
     build_dim_technician,
     build_fact_rows,
+    build_material_lines,
 )
 from validate import validate_materials, validate_tasks
 
@@ -62,10 +63,11 @@ def persist_quarantine(quarantine_root: Path, file_stem: str, quarantined_tasks,
 
 
 def build_warehouse_rows(clean_tasks, clean_materials, tech_logs):
-    """Build dimension and fact payloads from the clean extracted subset."""
+    """Build dimension, fact, and material-line payloads from the clean subset."""
     return (
         build_dim_technician(tech_logs),
         build_dim_material(clean_materials),
         build_dim_date(clean_tasks),
-        build_fact_rows(clean_tasks, clean_materials),
+        build_fact_rows(clean_tasks),
+        build_material_lines(clean_materials),
     )

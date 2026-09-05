@@ -105,20 +105,33 @@ jobs:
       - name: Verify data landed in Postgres
         run: |
           COUNT=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_orders;")
+          LINES=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_order_materials;")
           echo "Fact rows loaded: $COUNT"
+          echo "Material lines loaded: $LINES"
           if [ "$COUNT" -lt 1 ]; then
             echo "No rows loaded - pipeline failed silently"
             exit 1
           fi
+          if [ "$LINES" -lt 1 ]; then
+            echo "No material lines loaded"
+            exit 1
+          fi
           echo "FACT_COUNT=$COUNT" >> "$GITHUB_ENV"
+          echo "LINE_COUNT=$LINES" >> "$GITHUB_ENV"
 
       - name: Re-run pipeline and verify upsert did not duplicate facts
         run: |
           docker compose run --rm --no-deps --name telecom_ops_app_rerun app
           COUNT2=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_orders;")
+          LINES2=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_order_materials;")
           echo "Fact rows after second run: $COUNT2"
+          echo "Material lines after second run: $LINES2"
           if [ "$COUNT2" != "$FACT_COUNT" ]; then
             echo "Expected upsert to keep $FACT_COUNT fact rows, got $COUNT2"
+            exit 1
+          fi
+          if [ "$LINES2" != "$LINE_COUNT" ]; then
+            echo "Expected upsert to keep $LINE_COUNT material lines, got $LINES2"
             exit 1
           fi
 

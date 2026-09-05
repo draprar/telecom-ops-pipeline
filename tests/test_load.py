@@ -11,6 +11,7 @@ from load import (
     load_dim_technician,
     load_facts,
     load_star_schema,
+    replace_material_lines,
 )
 
 
@@ -81,7 +82,7 @@ def test_get_id_maps_builds_lookup_dicts():
     assert date_map == {"2026-08-17": 100}
 
 
-def test_load_facts_maps_ids_and_inserts():
+def test_load_facts_maps_ids_and_upserts_without_material_columns():
     cur = MagicMock()
     load_facts(
         cur,
@@ -89,50 +90,46 @@ def test_load_facts_maps_ids_and_inserts():
             {
                 "task_id": 1,
                 "technician_name": "Jan Kowalski",
-                "material_name": "cable",
                 "task_date": "2026-08-17",
                 "task_type": "repair",
                 "duration_minutes": 60,
-                "material_quantity": 2.0,
-                "total_cost": 20.0,
                 "status": "completed",
             }
         ],
         {"Jan Kowalski": 1},
-        {"cable": 10},
         {"2026-08-17": 100},
     )
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO fact_work_orders" in sql
     assert "ON CONFLICT (task_id) DO UPDATE" in sql
-    assert params == (1, 1, 10, 100, "repair", 60, 2.0, 20.0, "completed")
+    assert "material_id" not in sql
+    assert params == (1, 1, 100, "repair", 60, "completed")
 
 
-def test_load_facts_uses_none_for_missing_dimension_keys():
+def test_replace_material_lines_deletes_batch_then_inserts():
     cur = MagicMock()
-    load_facts(
+    replace_material_lines(
         cur,
         [
             {
                 "task_id": 1,
-                "technician_name": "Jan Kowalski",
-                "material_name": None,
-                "task_date": "2026-08-17",
-                "task_type": "inspection",
-                "duration_minutes": 30,
-                "material_quantity": 0,
-                "total_cost": 0,
-                "status": "completed",
+                "material_name": "cable",
+                "quantity": 2.0,
+                "line_cost": 20.0,
             }
         ],
-        {"Jan Kowalski": 1},
-        {},
-        {"2026-08-17": 100},
+        {"cable": 10},
+        {1},
     )
 
-    _, params = cur.execute.call_args.args
-    assert params[:4] == (1, 1, None, 100)
+    delete_sql, delete_params = cur.execute.call_args_list[0].args
+    assert "DELETE FROM fact_work_order_materials" in delete_sql
+    assert delete_params == ([1],)
+
+    insert_sql, insert_params = cur.execute.call_args_list[1].args
+    assert "INSERT INTO fact_work_order_materials" in insert_sql
+    assert insert_params == (1, 10, 2.0, 20.0)
 
 
 def test_load_star_schema_commits_once():
@@ -154,20 +151,25 @@ def test_load_star_schema_commits_once():
             {
                 "task_id": 1,
                 "technician_name": "Jan Kowalski",
-                "material_name": "cable",
                 "task_date": "2026-08-17",
                 "task_type": "repair",
                 "duration_minutes": 60,
-                "material_quantity": 2.0,
-                "total_cost": 20.0,
                 "status": "completed",
+            }
+        ],
+        [
+            {
+                "task_id": 1,
+                "material_name": "cable",
+                "quantity": 2.0,
+                "line_cost": 20.0,
             }
         ],
     )
 
     conn.commit.assert_called_once()
     conn.rollback.assert_not_called()
-    assert cur.execute.call_count == 7
+    assert cur.execute.call_count == 9
 
 
 def test_load_star_schema_rolls_back_on_error():
@@ -177,7 +179,7 @@ def test_load_star_schema_rolls_back_on_error():
     cur.execute.side_effect = RuntimeError("db down")
 
     with pytest.raises(RuntimeError, match="db down"):
-        load_star_schema(conn, [], [], [], [])
+        load_star_schema(conn, [], [], [], [], [])
 
     conn.rollback.assert_called_once()
     conn.commit.assert_not_called()

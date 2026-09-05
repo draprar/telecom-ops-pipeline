@@ -107,7 +107,7 @@ def transform_task(ti, **kwargs):
     tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
     staging_dir = _staging_dir(ti.run_id)
-    dim_technician, dim_material, dim_date, fact_rows = build_warehouse_rows(
+    dim_technician, dim_material, dim_date, fact_rows, material_lines = build_warehouse_rows(
         clean_tasks, clean_materials, tech_logs
     )
 
@@ -127,6 +127,10 @@ def transform_task(ti, **kwargs):
         key="fact_rows_path",
         value=_write_json(staging_dir / "fact_rows.json", fact_rows),
     )
+    ti.xcom_push(
+        key="material_lines_path",
+        value=_write_json(staging_dir / "material_lines.json", material_lines),
+    )
 
 
 def load_task(ti, **kwargs):
@@ -134,6 +138,7 @@ def load_task(ti, **kwargs):
     dim_material_rows = _read_json(ti.xcom_pull(key="dim_material_path", task_ids="transform"))
     dim_date_rows = _read_json(ti.xcom_pull(key="dim_date_path", task_ids="transform"))
     fact_rows = _read_json(ti.xcom_pull(key="fact_rows_path", task_ids="transform"))
+    material_lines = _read_json(ti.xcom_pull(key="material_lines_path", task_ids="transform"))
 
     # Airflow-native connection lookup instead of os.getenv()/load_dotenv():
     # the credentials live in an Airflow Connection (here defined via the
@@ -149,8 +154,13 @@ def load_task(ti, **kwargs):
             dim_material_rows,
             dim_date_rows,
             fact_rows,
+            material_lines,
         )
-        logger.info("Loaded %d fact rows.", len(fact_rows))
+        logger.info(
+            "Loaded %d fact rows and %d material lines.",
+            len(fact_rows),
+            len(material_lines),
+        )
     finally:
         conn.close()
 

@@ -55,6 +55,7 @@ def _stub_pipeline_inputs(monkeypatch, *, task_errors=None):
             [{"material_name": "cable"}],
             [{"full_date": "2026-08-17"}],
             fact_rows,
+            [{"task_id": 1, "material_name": "cable", "quantity": 2.0, "line_cost": 20.0}],
         ),
     )
     return fact_rows
@@ -82,6 +83,7 @@ def test_run_pipeline_commits_on_success(monkeypatch, caplog, tmp_path):
         [{"material_name": "cable"}],
         [{"full_date": "2026-08-17"}],
         fact_rows,
+        [{"task_id": 1, "material_name": "cable", "quantity": 2.0, "line_cost": 20.0}],
     )
     conn.close.assert_called_once()
     assert "No validation issues found" in caplog.text

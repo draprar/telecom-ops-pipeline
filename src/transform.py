@@ -9,7 +9,8 @@ def build_dim_technician(tech_logs):
         "hire_date": row["hire_date"],
     }
     for row in tech_logs
-    ]   
+    ]
+
 
 def build_dim_material(materials):
     unique = {}
@@ -36,32 +37,48 @@ def build_dim_date(tasks):
         })
     return dims
 
-def build_fact_rows(tasks, materials):
-    """
-    Build fact table for work orders
-    """
-    materials_by_task = {}
-    for m in materials:
-        materials_by_task.setdefault(str(m["task_id"]), []).append(m)
- 
-    rows = []
-    for task in tasks:
-        task_materials = materials_by_task.get(task["task_id"], [])
-        total_cost = sum(float(m["quantity"]) * float(m["unit_cost"]) for m in task_materials)
-        material_name = task_materials[0]["material_name"] if task_materials else None
-        material_qty = sum(float(m["quantity"]) for m in task_materials)
- 
-        rows.append(
+
+def build_fact_rows(tasks):
+    """One fact row per work order — materials live on the bridge table."""
+    return [
+        {
+            "task_id": int(task["task_id"]),
+            "technician_name": task["technician_name"],
+            "task_date": task["task_date"],
+            "task_type": task["task_type"],
+            "duration_minutes": int(task["duration_minutes"]),
+            "status": task["status"],
+        }
+        for task in tasks
+    ]
+
+
+def build_material_lines(materials):
+    """One row per (task, material), summing duplicate source lines."""
+    aggregated = {}
+    for row in materials:
+        task_id = int(str(row["task_id"]).strip())
+        key = (task_id, row["material_name"])
+        quantity = float(row["quantity"])
+        line_cost = quantity * float(row["unit_cost"])
+        if key not in aggregated:
+            aggregated[key] = {
+                "task_id": task_id,
+                "material_name": row["material_name"],
+                "quantity": 0.0,
+                "line_cost": 0.0,
+            }
+        aggregated[key]["quantity"] += quantity
+        aggregated[key]["line_cost"] += line_cost
+
+    lines = []
+    for row in aggregated.values():
+        lines.append(
             {
-                "task_id": int(task["task_id"]),
-                "technician_name": task["technician_name"],
-                "material_name": material_name,
-                "task_date": task["task_date"],
-                "task_type": task["task_type"],
-                "duration_minutes": int(task["duration_minutes"]),
-                "material_quantity": material_qty,
-                "total_cost": round(total_cost, 2),
-                "status": task["status"],
+                "task_id": row["task_id"],
+                "material_name": row["material_name"],
+                "quantity": round(row["quantity"], 2),
+                "line_cost": round(row["line_cost"], 2),
             }
         )
-    return rows
+    return lines

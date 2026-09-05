@@ -91,12 +91,13 @@ telecom-ops-pipeline/
 
 ## Data model
 
-Star schema: one fact table, three dimensions.
+Star schema: work-order facts, material-line facts, three dimensions.
 
-- `fact_work_orders` — one row per work order, with a `task_id` natural key (unique, upserted on
-  reload for idempotency) and foreign keys into the dimensions below.
-- `dim_technician` and `dim_material` — descriptive attributes, upserted as SCD1 (`region` /
-  `hire_date` / `unit_cost` update in place on reload). `dim_date` is insert-only.
+- `fact_work_orders` — one row per work order (`task_id` unique, upserted on reload).
+- `fact_work_order_materials` — one row per material used on a work order
+  (`task_id` + `material_id` unique); quantity and line cost live here, not on the header.
+- `dim_technician` and `dim_material` — SCD1 (`region` / `hire_date` / `unit_cost`).
+  `dim_date` is insert-only.
 
 ## Getting started
 
@@ -202,8 +203,9 @@ Every push to `main` (and every pull request targeting `main`) runs, via GitHub 
 2. **`dag-validation`** — imports the DAG with Airflow 2.10 (constrained) and checks that
    `telecom_ops_etl` loads with the expected five tasks
 3. **`integration-test`** — builds the Docker image, spins up Postgres + app, fails if the
-   app container exits non-zero, verifies row counts in the database, then runs the pipeline
-   a second time and asserts the fact count did not double (upsert)
+   app container exits non-zero, verifies row counts in the database (facts and material
+   lines), then runs the pipeline a second time and asserts those counts did not double
+   (upsert)
 
 ## Design decisions & known simplifications
 
@@ -242,10 +244,9 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   has the fix baked in. This was verified against a real Postgres instance with data already
   inserted under the old schema: `alembic upgrade head` added the constraint without touching the
   existing rows, which is the actual point of a migration tool over a "current state" SQL file.
-- **One material per fact row.** A work order can use several materials, but `fact_work_orders`
-  stores a single `material_id`. Quantity and cost are summed across all materials for that task;
-  the "representative" material is just the first one seen. A fully correct model would use a
-  bridge table for the task↔material many-to-many relationship.
+  A later revision adds `fact_work_order_materials` and drops the collapsed material columns
+  from `fact_work_orders`; existing fact rows cannot be exploded back into lines, so an
+  upgraded database needs a pipeline reload from source.
 - **JSON staging files, not Parquet.** The Airflow DAG passes data between tasks via small JSON
   files rather than through XCom directly, to avoid XCom's size limits — a real pattern for
   larger datasets. At this data volume, Parquet would be the natural next upgrade (smaller files,
@@ -282,7 +283,6 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 
 ## Possible next steps
 
-- Bridge table for task↔material instead of the single-material simplification
 - Parquet instead of JSON for staging files
 - Quarantine records in a proper Postgres table instead of JSON files, so they're queryable
   and can back a simple "data quality" dashboard instead of requiring someone to open a file
