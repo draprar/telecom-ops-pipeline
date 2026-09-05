@@ -1,127 +1,34 @@
 ---
-description: Dyscyplina inżynierska senior-level — testy, czysty kod, architektura i kontrolowana praca z Git
+description: Dyscyplina inżynierska — zakres, testy, wzorce ETL tego repo
 alwaysApply: true
 ---
 
-Komunikuj się z użytkownikiem po polsku.
+Komunikuj się z użytkownikiem po polsku. Pracuj jak senior utrzymujący ten kod, nie jak jednorazowe zadanie.
 
-# Zasady
+## Zakres i decyzje
 
-Pracuj jak senior, który będzie utrzymywał ten kod długoterminowo, nie jak ktoś robiący jednorazowe zadanie.
+- Rób to, o co poproszono. Problemy poza zakresem zgłoś na końcu, nie zmieniaj ich po cichu.
+- Nie zmieniaj ustaleń z README **"Design decisions & known simplifications"** bez decyzji użytkownika.
+- Przy sprzeczności README vs reguła Cursora vs kod: **README i kod wygrywają**. Zaktualizuj regułę albo zapytaj — nie cofaj kodu do starszej checklisty.
+- Trade-off albo dwie rozsądne drogi architektury → zapytaj, nie zgaduj.
 
-## Nie idź na łatwiznę
+## Wzorce tego projektu
 
-Zawsze wybieraj rozwiązanie poprawne, nie najszybsze do napisania.
+- Etapy: extract → validate → quarantine → transform → load. Nowa odpowiedzialność = nowa funkcja/moduł, nie wciskaj jej w obcy etap.
+- DAG: `PostgresHook` / Airflow Connection. Skrypt standalone: `os.getenv()` / `load.py`. Nie mieszaj ścieżek.
+- Alerting: łap błędy ścieżki webhooka (kontekst, `requests`, JSON), loguj bez URL, nie re-raise. Goły `except Exception` nie jest celem.
+- Kwarantanna = błąd wiersza. Raise = awaria systemowa (brak pliku, pad bazy).
 
-- Test nie przechodzi → napraw przyczynę, nie osłabiaj testu ani oczekiwanego wyniku.
-- Nie wyciszaj błędów/ostrzeżeń bez usunięcia przyczyny.
-- Nie hardkoduj wartości pod konkretny test lub dane.
-- Nie duplikuj logiki, jeśli można sensownie wykorzystać istniejący wzorzec.
-- Flaky test lub dziwne zachowanie → zdiagnozuj przyczynę, nie maskuj problemu timeoutem/retry.
-- Jeśli szybkie i poprawne rozwiązanie się różnią, wybierz poprawne i poinformuj o większym nakładzie pracy.
+## Testy i jakość
 
-## Trzymaj zakres zmiany
+- Nowa/zmieniona logika w `src/`, `dags/`, `scripts/` dostaje test w `tests/` w tej samej zmianie. Test sprawdza zachowanie, nie tylko brak wyjątku.
+- Test pada → napraw kod, nie osłabiaj asercji. Nie wyciszaj lintera/`except` bez usunięcia przyczyny.
+- Nie hardkoduj pod jeden test ani pod aktualne dane syntetyczne.
+- Flaky → diagnoza, nie większy timeout.
+- Martwy kod w edytowanej funkcji można usunąć od razu. Żadnych łatek, zakomentowanego kodu, `TODO: później`.
 
-- Rób to, o co poproszono — nie więcej.
-- Zauważone problemy poza zakresem zgłoś na końcu, ale nie zmieniaj ich po cichu.
-- Nie zmieniaj udokumentowanych decyzji projektowych bez decyzji użytkownika.
-- Martwy kod w bezpośrednio edytowanej funkcji można posprzątać przy okazji.
+## Pętla
 
-## Testy idą razem ze zmianą
+`zrozumienie → implementacja → test → poprawka → review diff`
 
-- Każda nowa lub zmieniona logika w `src/`, `dags/` lub `scripts/` musi mieć odpowiedni test w `tests/`.
-- Test ma sprawdzać rzeczywiste zachowanie, nie tylko brak wyjątku.
-- Jeżeli czegoś nie da się sensownie przetestować, wskaż dokładnie dlaczego.
-- Po zmianach uruchom odpowiednie testy oraz dostępne lint/type-check/format check.
-
-## Myśl, zanim napiszesz
-
-- Najpierw ustal, gdzie dana logika powinna żyć.
-- Zachowuj istniejący podział odpowiedzialności i wzorce projektu.
-- Nie dodawaj nowej abstrakcji, jeśli istniejący wzorzec można rozsądnie rozszerzyć.
-- Przy istotnym trade-offie lub decyzji architektonicznej poinformuj użytkownika zamiast wybierać po cichu.
-
-## Czysty kod
-
-- Jedna odpowiedzialność na funkcję.
-- Sensowne nazwy zamiast komentarzy tłumaczących złe nazwy.
-- Nie zostawiaj debugowania, zakomentowanego kodu, tymczasowych łatek ani przypadkowych artefaktów.
-- Nie zostawiaj `TODO: poprawić później`, jeśli problem można rozwiązać w ramach bieżącej zmiany.
-
-## Praca iteracyjna
-
-Pracuj w pętli aż do faktycznego zakończenia zadania:
-
-`zrozumienie → plan → implementacja → test → diagnoza/poprawka → test → review diff → kolejna iteracja`
-
-Nie kończ pracy tylko dlatego, że pierwsza implementacja działa. Jeżeli testy lub wymagania ujawnią problem, wróć do pętli i popraw go.
-
-Po każdej iteracji sprawdź:
-
-- czy wymaganie zostało spełnione,
-- czy testy przechodzą,
-- czy nie powstała regresja,
-- czy rozwiązanie jest zgodne z architekturą projektu,
-- czy diff nie zawiera niepotrzebnych zmian.
-
-## Git i branch workflow
-
-Stosuj istniejącą konwencję repozytorium. Przed rozpoczęciem sprawdź `git status`, aktualny branch oraz ostatnie commity.
-
-- Pracuj na dedykowanym branchu zgodnym z konwencją projektu.
-- Jeżeli odpowiedni branch już istnieje, użyj go.
-- Nie pracuj bezpośrednio na `main`/`master`, jeśli projekt używa branchy zadaniowych.
-- Nie nadpisuj ani nie usuwaj istniejących zmian użytkownika.
-- Nie twórz kolejnych branchy bez potrzeby.
-
-### Zakaz automatycznych operacji Git
-
-**Nie wykonuj samodzielnie:**
-
-- `git commit`
-- `git push`
-- tworzenia lub aktualizacji PR
-- merge
-- usuwania branchy
-
-Użytkownik obsługuje commit, push, PR, merge i usunięcie brancha.
-
-Możesz:
-
-- analizować historię Git,
-- sprawdzać `git diff` i `git status`,
-- przygotować sugerowany commit message zgodny z istniejącą konwencją.
-
-## Zakończenie zadania
-
-Przed zakończeniem:
-
-1. Uruchom odpowiednie testy i kontrole jakości.
-2. Sprawdź `git diff`.
-3. Sprawdź `git status`.
-4. Upewnij się, że diff zawiera wyłącznie zmiany związane z zadaniem.
-5. Upewnij się, że nie zostały debug printy, tymczasowe pliki ani inne artefakty.
-6. Nie wykonuj `git commit`, `git push`, PR, merge ani usunięcia brancha.
-
-Gdy wszystko jest poprawne, zatrzymaj się i napisz:
-
-**GOTOWE DO COMMITA**
-
-Podaj:
-
-- branch,
-- wykonane testy i ich wynik,
-- wykonane kontrole jakości i ich wynik,
-- krótki opis zmian,
-- sugerowany commit message,
-- informację, że commit nie został wykonany.
-
-Jeżeli czegoś nie można zweryfikować albo wymaga decyzji użytkownika, wskaż to zamiast oznaczać zadanie jako gotowe.
-
-## Zasada końcowa
-
-Twoim celem jest doprowadzenie kodu do stanu **zweryfikowanego i gotowego do commita**, ale nie wykonywanie operacji Git zastrzeżonych dla użytkownika.
-
-Docelowy workflow:
-
-`branch → implementacja → test → poprawka → test → review diff → GOTOWE DO COMMITA → użytkownik commit → użytkownik push → użytkownik PR → merge → usunięcie brancha`
+Nie kończ na „pierwsze uruchomienie działa”. Przed oddaniem: wymaganie spełnione, testy i lint przeszły, diff bez śmieci. Git: patrz `git-handoff.mdc`.
