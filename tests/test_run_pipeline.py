@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -94,7 +96,9 @@ def test_run_pipeline_rolls_back_on_error(monkeypatch, caplog, tmp_path):
         run_pipeline, "get_id_maps", MagicMock(side_effect=RuntimeError("db down"))
     )
 
-    with caplog.at_level(logging.INFO, logger="run_pipeline"):
+    with caplog.at_level(logging.INFO, logger="run_pipeline"), pytest.raises(
+        RuntimeError, match="db down"
+    ):
         run_pipeline.run()
 
     conn.rollback.assert_called_once()
