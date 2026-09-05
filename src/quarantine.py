@@ -17,21 +17,18 @@ def split_tasks(tasks, task_errors):
     """Split CRM tasks into (clean_tasks, quarantined_tasks).
 
     `quarantined_tasks` is a list of {"record": ..., "errors": [...]}
-    dicts - one entry per distinct bad task_id, even if that task_id
-    triggered several different validation errors.
+    dicts — one entry per flagged source row, including every duplicate
+    `task_id`, so the review file matches what was excluded from load.
     """
     errors_by_task = {}
     for task_id, message in task_errors:
         errors_by_task.setdefault(task_id, []).append(message)
 
     clean, quarantined = [], []
-    already_quarantined = set()
     for row in tasks:
         task_id = row["task_id"]
         if task_id in errors_by_task:
-            if task_id not in already_quarantined:
-                quarantined.append({"record": row, "errors": errors_by_task[task_id]})
-                already_quarantined.add(task_id)
+            quarantined.append({"record": row, "errors": errors_by_task[task_id]})
         else:
             clean.append(row)
     return clean, quarantined
@@ -40,22 +37,24 @@ def split_tasks(tasks, task_errors):
 def split_materials(materials, material_errors, clean_task_ids):
     """Split ERP materials into (clean_materials, quarantined_materials).
 
-    A material row is quarantined if validate_materials() flagged it
-    directly (unknown task_id), OR if its task_id isn't in
-    `clean_task_ids` - which also cascades the quarantine: a material
-    for a task that existed but was itself quarantined gets quarantined
-    too, since it has nothing valid left to attach to.
+    A material row is quarantined if validate_materials() flagged that
+    row (by index), OR if its task_id isn't in `clean_task_ids` — which
+    also cascades the quarantine: a material for a task that existed but
+    was itself quarantined gets quarantined too, since it has nothing
+    valid left to attach to.
     """
-    errors_by_task = {}
-    for task_id, message in material_errors:
-        errors_by_task.setdefault(task_id, []).append(message)
+    errors_by_index = {}
+    for index, message in material_errors:
+        errors_by_index.setdefault(index, []).append(message)
 
     clean, quarantined = [], []
-    for row in materials:
-        task_id = str(row["task_id"]).strip()
-        reasons = list(errors_by_task.get(task_id, []))
+    for index, row in enumerate(materials):
+        task_id = str(row.get("task_id", "")).strip()
+        reasons = list(errors_by_index.get(index, []))
         if task_id not in clean_task_ids and not reasons:
-            reasons.append(f"Task ID {row['task_id']} was quarantined, so its materials are too")
+            reasons.append(
+                f"Task ID {row.get('task_id')} was quarantined, so its materials are too"
+            )
         if reasons:
             quarantined.append({"record": row, "errors": reasons})
         else:

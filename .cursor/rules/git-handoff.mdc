@@ -1,29 +1,26 @@
 ---
-description: Git i PR — agent nie commituje sam; na wyraźną prośbę tak
+description: Po akceptacji zmian i ok/działaj/commit — commit, push i PR
 alwaysApply: true
 ---
 
 # Git
 
-Domyślnie **nie** wykonuj `git commit`, `git push`, tworzenia/aktualizacji PR, merge ani usuwania branchy.
+Nie zaczynaj commit/push/PR, dopóki użytkownik nie zaakceptuje zmian i nie da sygnału do zamknięcia. Nie force-push, nie `--no-verify`, nie amend cudzego commita, nie merge, nie usuwaj branchy — chyba że o to poprosi.
 
-Przed pracą: `git status`, aktualny branch, ostatnie commity. Nie nadpisuj niezcommitowanych zmian użytkownika. Nie force-push, nie `--no-verify`, nie amend cudzego commita.
+Przed pracą: `git status`, branch, ostatnie commity. Nie nadpisuj jego niezcommitowanej pracy. Na branchu zadaniowym, nie na `main`/`master`.
 
-- Jeśli projekt używa branchy zadaniowych: nie commituj na `main`/`master`; użyj istniejącego brancha albo utwórz jeden, gdy użytkownik o to prosi.
-- Wolno: `git status` / `diff` / `log`, zaproponować commit message w konwencji repo.
+## Sygnał do zamknięcia = cała ścieżka
 
-## Gdy użytkownik wyraźnie każe commit / push / PR
+Gdy użytkownik **zaakceptował zmiany** (Accept) i pisze m.in. **ok**, **działaj**, **commit**, **commitujemy**, **push**, **zrób PR** — to nie jest „tylko commit”. Zrób **całość**:
 
-Wykonaj to (zgodnie z jego instrukcją i globalnymi zasadami Git). Nadal bez force-push, skip hooków i niszczenia historii, chyba że o to poprosi.
+1. Commit (jeśli jest co commitować), message w konwencji repo.
+2. `git push -u` na origin.
+3. PR przez `gh pr create` (tytuł + body: summary + test plan). Zwróć URL.
 
-## Domyślne zakończenie zadania
+Nie pytaj ponownie, czy push i PR też. Nie kończ po commicie.
 
-Testy + lint → `git diff` / `status` → diff tylko o zadanie, bez artefaktów.
+Wyjątek: użytkownik mówi wprost **tylko commit** / **bez push** / **bez PR**.
 
-Następnie:
+## Dopóki nie ma tego sygnału
 
-**GOTOWE DO COMMITA**
-
-Podaj: branch, wyniki testów i lint, krótki opis, sugerowany commit message, informację że commit nie został wykonany.
-
-Jeśli czegoś nie da się zweryfikować albo trzeba decyzji — nie oznaczaj jako gotowe.
+**GOTOWE DO COMMITA** — branch, testy, lint, opis, sugerowany message, commit nie wykonany.

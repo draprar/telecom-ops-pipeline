@@ -1,6 +1,8 @@
 from datetime import date
 from unittest.mock import MagicMock
 
+import pytest
+
 from load import (
     get_connection,
     get_id_maps,
@@ -8,6 +10,7 @@ from load import (
     load_dim_material,
     load_dim_technician,
     load_facts,
+    load_star_schema,
 )
 
 
@@ -36,6 +39,7 @@ def test_load_dim_technician_inserts_rows():
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO dim_technician" in sql
+    assert "ON CONFLICT (full_name) DO UPDATE" in sql
     assert params == ("Jan Kowalski", "Gdansk", "2020-01-01")
 
 
@@ -45,6 +49,7 @@ def test_load_dim_material_inserts_rows():
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO dim_material" in sql
+    assert "ON CONFLICT (material_name) DO UPDATE" in sql
     assert params == ("cable", 10)
 
 
@@ -57,6 +62,7 @@ def test_load_dim_date_inserts_rows():
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO dim_date" in sql
+    assert "ON CONFLICT (full_date) DO NOTHING" in sql
     assert params == ("2026-08-17", 2026, 8, 17, "Monday")
 
 
@@ -99,17 +105,18 @@ def test_load_facts_maps_ids_and_inserts():
 
     sql, params = cur.execute.call_args.args
     assert "INSERT INTO fact_work_orders" in sql
+    assert "ON CONFLICT (task_id) DO UPDATE" in sql
     assert params == (1, 1, 10, 100, "repair", 60, 2.0, 20.0, "completed")
 
 
-def test_load_facts_uses_none_for_missing_keys():
+def test_load_facts_uses_none_for_missing_dimension_keys():
     cur = MagicMock()
     load_facts(
         cur,
         [
             {
                 "task_id": 1,
-                "technician_name": "Unknown",
+                "technician_name": "Jan Kowalski",
                 "material_name": None,
                 "task_date": "2026-08-17",
                 "task_type": "inspection",
@@ -119,10 +126,58 @@ def test_load_facts_uses_none_for_missing_keys():
                 "status": "completed",
             }
         ],
-        {},
+        {"Jan Kowalski": 1},
         {},
         {"2026-08-17": 100},
     )
 
     _, params = cur.execute.call_args.args
-    assert params[:4] == (1, None, None, 100)
+    assert params[:4] == (1, 1, None, 100)
+
+
+def test_load_star_schema_commits_once():
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    cur.fetchall.side_effect = [
+        [(1, "Jan Kowalski")],
+        [(10, "cable")],
+        [(100, date(2026, 8, 17))],
+    ]
+
+    load_star_schema(
+        conn,
+        [{"full_name": "Jan Kowalski", "region": "Gdansk", "hire_date": "2020-01-01"}],
+        [{"material_name": "cable", "unit_cost": 10}],
+        [{"full_date": "2026-08-17", "year": 2026, "month": 8, "day": 17, "weekday": "Monday"}],
+        [
+            {
+                "task_id": 1,
+                "technician_name": "Jan Kowalski",
+                "material_name": "cable",
+                "task_date": "2026-08-17",
+                "task_type": "repair",
+                "duration_minutes": 60,
+                "material_quantity": 2.0,
+                "total_cost": 20.0,
+                "status": "completed",
+            }
+        ],
+    )
+
+    conn.commit.assert_called_once()
+    conn.rollback.assert_not_called()
+    assert cur.execute.call_count == 7
+
+
+def test_load_star_schema_rolls_back_on_error():
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    cur.execute.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        load_star_schema(conn, [], [], [], [])
+
+    conn.rollback.assert_called_once()
+    conn.commit.assert_not_called()

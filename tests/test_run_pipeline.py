@@ -28,7 +28,7 @@ def _stub_pipeline_inputs(monkeypatch, *, task_errors=None, material_errors=None
     monkeypatch.setattr(run_pipeline, "load_crm_tasks", lambda: tasks)
     monkeypatch.setattr(run_pipeline, "load_erp_materials", lambda: materials)
     monkeypatch.setattr(run_pipeline, "load_technician_logs", lambda: tech_logs)
-    monkeypatch.setattr(run_pipeline, "validate_tasks", lambda _tasks: task_errors or [])
+    monkeypatch.setattr(run_pipeline, "validate_tasks", lambda _tasks, _names: task_errors or [])
     monkeypatch.setattr(
         run_pipeline, "validate_materials", lambda _materials, _ids: material_errors or []
     )
@@ -39,30 +39,29 @@ def _stub_pipeline_inputs(monkeypatch, *, task_errors=None, material_errors=None
     return fact_rows
 
 
-def _stub_db(monkeypatch, maps=None):
+def _stub_db(monkeypatch):
     conn, cur = _connection_with_cursor()
     monkeypatch.setattr(run_pipeline, "get_connection", lambda: conn)
-    monkeypatch.setattr(run_pipeline, "get_id_maps", lambda _cur: maps or ({}, {}, {}))
-    monkeypatch.setattr(run_pipeline, "load_dim_technician", MagicMock())
-    monkeypatch.setattr(run_pipeline, "load_dim_material", MagicMock())
-    monkeypatch.setattr(run_pipeline, "load_dim_date", MagicMock())
-    load_facts = MagicMock()
-    monkeypatch.setattr(run_pipeline, "load_facts", load_facts)
-    return conn, cur, load_facts
+    load_star = MagicMock()
+    monkeypatch.setattr(run_pipeline, "load_star_schema", load_star)
+    return conn, cur, load_star
 
 
 def test_run_pipeline_commits_on_success(monkeypatch, caplog, tmp_path):
     fact_rows = _stub_pipeline_inputs(monkeypatch)
     monkeypatch.setattr(run_pipeline, "QUARANTINE_ROOT", tmp_path)
-    maps = ({"Jan Kowalski": 1}, {"cable": 10}, {"2026-08-17": 100})
-    conn, cur, load_facts = _stub_db(monkeypatch, maps)
+    conn, _cur, load_star = _stub_db(monkeypatch)
 
     with caplog.at_level(logging.INFO, logger="run_pipeline"):
         run_pipeline.run()
 
-    load_facts.assert_called_once_with(cur, fact_rows, *maps)
-    conn.commit.assert_called_once()
-    conn.rollback.assert_not_called()
+    load_star.assert_called_once_with(
+        conn,
+        [{"full_name": "Jan Kowalski"}],
+        [{"material_name": "cable"}],
+        [{"full_date": "2026-08-17"}],
+        fact_rows,
+    )
     conn.close.assert_called_once()
     assert "No validation issues found" in caplog.text
     assert list(tmp_path.iterdir()) == []  # nothing quarantined -> no file written
@@ -76,32 +75,28 @@ def test_run_pipeline_quarantines_bad_task_and_still_loads_clean_rows(monkeypatc
     # written and the run still completes (commits) instead of aborting.
     _stub_pipeline_inputs(monkeypatch, task_errors=[("1", "Invalid duration for task 1: 0")])
     monkeypatch.setattr(run_pipeline, "QUARANTINE_ROOT", tmp_path)
-    conn, _cur, _load_facts = _stub_db(monkeypatch)
+    _conn, _cur, load_star = _stub_db(monkeypatch)
 
     with caplog.at_level(logging.INFO, logger="run_pipeline"):
         run_pipeline.run()
 
-    conn.commit.assert_called_once()
+    load_star.assert_called_once()
     assert "Quarantined 1 task(s) and 1 material row(s)" in caplog.text
     written = list(tmp_path.iterdir())
     assert len(written) == 1
     assert written[0].suffix == ".json"
 
 
-def test_run_pipeline_rolls_back_on_error(monkeypatch, caplog, tmp_path):
+def test_run_pipeline_propagates_load_error(monkeypatch, caplog, tmp_path):
     _stub_pipeline_inputs(monkeypatch)
     monkeypatch.setattr(run_pipeline, "QUARANTINE_ROOT", tmp_path)
-    conn, _cur, _load_facts = _stub_db(monkeypatch)
-    monkeypatch.setattr(
-        run_pipeline, "get_id_maps", MagicMock(side_effect=RuntimeError("db down"))
-    )
+    conn, _cur, load_star = _stub_db(monkeypatch)
+    load_star.side_effect = RuntimeError("db down")
 
     with caplog.at_level(logging.INFO, logger="run_pipeline"), pytest.raises(
         RuntimeError, match="db down"
     ):
         run_pipeline.run()
 
-    conn.rollback.assert_called_once()
-    conn.commit.assert_not_called()
     conn.close.assert_called_once()
     assert "Pipeline run failed" in caplog.text

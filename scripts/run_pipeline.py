@@ -6,14 +6,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
-from load import (
-    get_connection,
-    get_id_maps,
-    load_dim_date,
-    load_dim_material,
-    load_dim_technician,
-    load_facts,
-)
+from load import get_connection, load_star_schema
 from logging_config import setup_logging
 from quarantine import split_materials, split_tasks, write_quarantine_file
 from transform import (
@@ -40,12 +33,13 @@ def run():
     tech_logs = load_technician_logs()
 
     logger.info("Validating tasks...")
-    valid_task_ids = {t["task_id"] for t in tasks}
-    task_errors = validate_tasks(tasks)
+    known_technicians = {row["technician_name"] for row in tech_logs}
+    valid_task_ids = {str(t["task_id"]).strip() for t in tasks if "task_id" in t}
+    task_errors = validate_tasks(tasks, known_technicians)
     material_errors = validate_materials(materials, valid_task_ids)
 
     clean_tasks, quarantined_tasks = split_tasks(tasks, task_errors)
-    clean_task_ids = {t["task_id"] for t in clean_tasks}
+    clean_task_ids = {str(t["task_id"]).strip() for t in clean_tasks}
     clean_materials, quarantined_materials = split_materials(
         materials, material_errors, clean_task_ids
     )
@@ -72,21 +66,16 @@ def run():
     logger.info("Loading data into database...")
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            logger.info("Loading technicians...")
-            load_dim_technician(cur, dim_technician_rows)
-            logger.info("Loading materials...")
-            load_dim_material(cur, dim_material_rows)
-            logger.info("Loading dates...")
-            load_dim_date(cur, dim_date_rows)
-            tech_map, material_map, date_map = get_id_maps(cur)
-            logger.info("Loading facts...")
-            load_facts(cur, fact_rows, tech_map, material_map, date_map)
-            conn.commit()
-            logger.info("Data loaded successfully, %d fact rows inserted", len(fact_rows))
+        load_star_schema(
+            conn,
+            dim_technician_rows,
+            dim_material_rows,
+            dim_date_rows,
+            fact_rows,
+        )
+        logger.info("Data loaded successfully, %d fact rows inserted", len(fact_rows))
     except Exception:
         logger.exception("Pipeline run failed, rolling back")
-        conn.rollback()
         raise
     finally:
         conn.close()

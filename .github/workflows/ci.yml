@@ -58,6 +58,10 @@ jobs:
           assert 'telecom_ops_etl' in bag.dags, 'DAG telecom_ops_etl not found'
           dag = bag.dags['telecom_ops_etl']
           assert len(dag.tasks) == 5, f'Expected 5 tasks, got {len(dag.tasks)}'
+          assert dag.get_task('extract').retries == 2
+          assert dag.get_task('load').retries == 2
+          assert dag.get_task('validate').retries == 0
+          assert dag.get_task('cleanup').retries == 0
           print('DAG OK — tasks:', [t.task_id for t in dag.tasks])
           "
 
@@ -104,6 +108,17 @@ jobs:
           echo "Fact rows loaded: $COUNT"
           if [ "$COUNT" -lt 1 ]; then
             echo "No rows loaded - pipeline failed silently"
+            exit 1
+          fi
+          echo "FACT_COUNT=$COUNT" >> "$GITHUB_ENV"
+
+      - name: Re-run pipeline and verify upsert did not duplicate facts
+        run: |
+          docker compose run --rm --no-deps --name telecom_ops_app_rerun app
+          COUNT2=$(docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -t -A -c "SELECT COUNT(*) FROM fact_work_orders;")
+          echo "Fact rows after second run: $COUNT2"
+          if [ "$COUNT2" != "$FACT_COUNT" ]; then
+            echo "Expected upsert to keep $FACT_COUNT fact rows, got $COUNT2"
             exit 1
           fi
 

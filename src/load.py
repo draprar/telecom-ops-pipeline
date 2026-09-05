@@ -20,7 +20,9 @@ def load_dim_technician(cur, rows):
             """
             INSERT INTO dim_technician (full_name, region, hire_date)
             VALUES (%s, %s, %s)
-            ON CONFLICT (full_name) DO NOTHING
+            ON CONFLICT (full_name) DO UPDATE SET
+                region = EXCLUDED.region,
+                hire_date = EXCLUDED.hire_date
             """,
             (row["full_name"], row["region"], row["hire_date"]),
         )
@@ -31,7 +33,8 @@ def load_dim_material(cur, rows):
             """
             INSERT INTO dim_material (material_name, unit_cost)
             VALUES (%s, %s)
-            ON CONFLICT (material_name) DO NOTHING
+            ON CONFLICT (material_name) DO UPDATE SET
+                unit_cost = EXCLUDED.unit_cost
             """,
             (row["material_name"], row["unit_cost"]),
         )
@@ -90,3 +93,22 @@ def load_facts(cur, fact_rows, tech_map, material_map, date_map):
                 row["status"],
             ),
         )
+
+
+def load_star_schema(conn, dim_technician_rows, dim_material_rows, dim_date_rows, fact_rows):
+    """Load dimensions then facts in one transaction.
+
+    Shared by the DAG and the standalone script so a failed fact load
+    does not leave dimensions committed.
+    """
+    try:
+        with conn.cursor() as cur:
+            load_dim_technician(cur, dim_technician_rows)
+            load_dim_material(cur, dim_material_rows)
+            load_dim_date(cur, dim_date_rows)
+            tech_map, material_map, date_map = get_id_maps(cur)
+            load_facts(cur, fact_rows, tech_map, material_map, date_map)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
