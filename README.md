@@ -74,6 +74,7 @@ telecom-ops-pipeline/
 │   └── schema.sql                # historical reference only - not applied automatically
 │                                  # anymore, see migrations/ instead
 ├── src/
+│   ├── pipeline.py               # shared validate/split/transform used by DAG and standalone
 │   ├── extract.py
 │   ├── validate.py
 │   ├── quarantine.py
@@ -227,9 +228,10 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   `hire_date` and `dim_material.unit_cost`. Calendar dates are immutable, so `dim_date` stays
   insert-only (`ON CONFLICT DO NOTHING`).
 - **DAG cleanup deletes staging only after a successful load.** A failed run leaves
-  `data/staging/<run_id>/` in place for debugging. Quarantine files live outside staging and
-  are never removed by cleanup. Extract and load retry twice with exponential backoff; validate,
-  transform, and cleanup do not.
+  `data/staging/<run_id>/` in place for debugging. Airflow `run_id` values are sanitized
+  (`:` / `+` → `_`) so staging and quarantine paths are legal on Windows NTFS bind-mounts.
+  Quarantine files live outside staging and are never removed by cleanup. Extract and load
+  retry twice with exponential backoff; validate, transform, and cleanup do not.
 - **Schema changes go through Alembic, with real "before/after" migrations.** The very first
   version of `fact_work_orders.task_id` had no `UNIQUE` constraint, which was added later by hand
   via `psql` once the upsert logic in `load_facts()` needed something to `ON CONFLICT` against —

@@ -14,14 +14,12 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from alerting import notify_on_failure
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
 from load import load_star_schema
-from quarantine import split_materials, split_tasks, write_quarantine_file
-from transform import (
-    build_dim_date,
-    build_dim_material,
-    build_dim_technician,
-    build_fact_rows,
+from pipeline import (
+    build_warehouse_rows,
+    persist_quarantine,
+    sanitize_run_id,
+    split_extracted,
 )
-from validate import validate_materials, validate_tasks
 
 # Do NOT call setup_logging() here - Airflow configures root logging itself
 # and captures per-task output into its own handlers/UI.
@@ -40,9 +38,13 @@ QUARANTINE_ROOT = Path(__file__).resolve().parent.parent / "data" / "quarantine"
 POSTGRES_CONN_ID = "postgres_default"
 
 
+def _run_slug(ti) -> str:
+    return sanitize_run_id(ti.run_id)
+
+
 def _staging_dir(run_id: str) -> Path:
     """Per-run staging folder so parallel DAG runs do not overwrite each other."""
-    d = STAGING_ROOT / run_id
+    d = STAGING_ROOT / sanitize_run_id(run_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -78,28 +80,15 @@ def validate_task(ti, **kwargs):
     materials = _read_json(ti.xcom_pull(key="materials_path", task_ids="extract"))
     tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
-    known_technicians = {row["technician_name"] for row in tech_logs}
-    valid_task_ids = {str(t["task_id"]).strip() for t in tasks if "task_id" in t}
-    task_errors = validate_tasks(tasks, known_technicians)
-    material_errors = validate_materials(materials, valid_task_ids)
-
-    clean_tasks, quarantined_tasks = split_tasks(tasks, task_errors)
-    clean_task_ids = {str(t["task_id"]).strip() for t in clean_tasks}
-    clean_materials, quarantined_materials = split_materials(
-        materials, material_errors, clean_task_ids
+    clean_tasks, clean_materials, quarantined_tasks, quarantined_materials = split_extracted(
+        tasks, materials, tech_logs
     )
-
-    if quarantined_tasks or quarantined_materials:
-        quarantine_path = QUARANTINE_ROOT / f"{ti.run_id}.json"
-        write_quarantine_file(quarantine_path, quarantined_tasks, quarantined_materials)
-        logger.warning(
-            "Quarantined %d task(s) and %d material row(s); details written to %s",
-            len(quarantined_tasks),
-            len(quarantined_materials),
-            quarantine_path,
-        )
-    else:
-        logger.info("No validation issues found.")
+    persist_quarantine(
+        QUARANTINE_ROOT,
+        _run_slug(ti),
+        quarantined_tasks,
+        quarantined_materials,
+    )
 
     staging_dir = _staging_dir(ti.run_id)
     ti.xcom_push(
@@ -118,24 +107,25 @@ def transform_task(ti, **kwargs):
     tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
     staging_dir = _staging_dir(ti.run_id)
+    dim_technician, dim_material, dim_date, fact_rows = build_warehouse_rows(
+        clean_tasks, clean_materials, tech_logs
+    )
 
     ti.xcom_push(
         key="dim_technician_path",
-        value=_write_json(staging_dir / "dim_technician.json", build_dim_technician(tech_logs)),
+        value=_write_json(staging_dir / "dim_technician.json", dim_technician),
     )
     ti.xcom_push(
         key="dim_material_path",
-        value=_write_json(staging_dir / "dim_material.json", build_dim_material(clean_materials)),
+        value=_write_json(staging_dir / "dim_material.json", dim_material),
     )
     ti.xcom_push(
         key="dim_date_path",
-        value=_write_json(staging_dir / "dim_date.json", build_dim_date(clean_tasks)),
+        value=_write_json(staging_dir / "dim_date.json", dim_date),
     )
     ti.xcom_push(
         key="fact_rows_path",
-        value=_write_json(
-            staging_dir / "fact_rows.json", build_fact_rows(clean_tasks, clean_materials)
-        ),
+        value=_write_json(staging_dir / "fact_rows.json", fact_rows),
     )
 
 
@@ -168,7 +158,7 @@ def load_task(ti, **kwargs):
 def cleanup_task(ti, **kwargs):
     """Remove the staging folder after a successful run. Quarantine records
     live in QUARANTINE_ROOT, outside the staging dir, so they survive this."""
-    staging_dir = STAGING_ROOT / ti.run_id
+    staging_dir = STAGING_ROOT / _run_slug(ti)
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
         logger.info("Removed staging dir: %s", staging_dir)
