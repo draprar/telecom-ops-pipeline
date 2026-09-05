@@ -40,6 +40,17 @@ def test_split_tasks_groups_multiple_errors_for_same_task():
     ]
 
 
+def test_split_tasks_keeps_every_duplicate_source_row():
+    tasks = [{"task_id": "1", "status": "open"}, {"task_id": "1", "status": "done"}]
+    task_errors = [("1", "Duplicate task ID found: 1")]
+
+    clean, quarantined = split_tasks(tasks, task_errors)
+
+    assert clean == []
+    assert [entry["record"] for entry in quarantined] == tasks
+    assert all(entry["errors"] == ["Duplicate task ID found: 1"] for entry in quarantined)
+
+
 def test_split_materials_keeps_clean_rows():
     materials = [{"task_id": "1", "material_name": "cable"}]
     clean, quarantined = split_materials(materials, material_errors=[], clean_task_ids={"1"})
@@ -50,7 +61,7 @@ def test_split_materials_keeps_clean_rows():
 
 def test_split_materials_quarantines_flagged_rows():
     materials = [{"task_id": "99", "material_name": "cable"}]
-    material_errors = [("99", "Task ID 99 not found in CRM tasks")]
+    material_errors = [(0, "Task ID 99 not found in CRM tasks")]
 
     clean, quarantined = split_materials(materials, material_errors, clean_task_ids={"1"})
 
@@ -69,6 +80,22 @@ def test_split_materials_cascades_when_task_was_quarantined():
 
     assert clean == []
     assert "quarantined" in quarantined[0]["errors"][0]
+
+
+def test_split_materials_quarantines_only_the_flagged_row():
+    materials = [
+        {"task_id": "1", "material_name": "cable", "quantity": 2},
+        {"task_id": "1", "material_name": "connector", "quantity": 0},
+    ]
+
+    clean, quarantined = split_materials(
+        materials,
+        material_errors=[(1, "Invalid quantity for material on task 1: 0")],
+        clean_task_ids={"1"},
+    )
+
+    assert clean == [materials[0]]
+    assert quarantined[0]["record"] == materials[1]
 
 
 def test_write_quarantine_file_creates_parent_dir_and_valid_json(tmp_path):

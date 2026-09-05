@@ -2,7 +2,7 @@ import json
 import logging
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
@@ -13,13 +13,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from alerting import notify_on_failure
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
-from load import (
-    get_id_maps,
-    load_dim_date,
-    load_dim_material,
-    load_dim_technician,
-    load_facts,
-)
+from load import load_star_schema
 from quarantine import split_materials, split_tasks, write_quarantine_file
 from transform import (
     build_dim_date,
@@ -82,13 +76,15 @@ def validate_task(ti, **kwargs):
     """
     tasks = _read_json(ti.xcom_pull(key="tasks_path", task_ids="extract"))
     materials = _read_json(ti.xcom_pull(key="materials_path", task_ids="extract"))
+    tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
-    valid_task_ids = {t["task_id"] for t in tasks}
-    task_errors = validate_tasks(tasks)
+    known_technicians = {row["technician_name"] for row in tech_logs}
+    valid_task_ids = {str(t["task_id"]).strip() for t in tasks if "task_id" in t}
+    task_errors = validate_tasks(tasks, known_technicians)
     material_errors = validate_materials(materials, valid_task_ids)
 
     clean_tasks, quarantined_tasks = split_tasks(tasks, task_errors)
-    clean_task_ids = {t["task_id"] for t in clean_tasks}
+    clean_task_ids = {str(t["task_id"]).strip() for t in clean_tasks}
     clean_materials, quarantined_materials = split_materials(
         materials, material_errors, clean_task_ids
     )
@@ -157,15 +153,13 @@ def load_task(ti, **kwargs):
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     conn = hook.get_conn()
     try:
-        with conn.cursor() as cur:
-            load_dim_technician(cur, dim_technician_rows)
-            load_dim_material(cur, dim_material_rows)
-            load_dim_date(cur, dim_date_rows)
-            conn.commit()
-
-            tech_map, material_map, date_map = get_id_maps(cur)
-            load_facts(cur, fact_rows, tech_map, material_map, date_map)
-            conn.commit()
+        load_star_schema(
+            conn,
+            dim_technician_rows,
+            dim_material_rows,
+            dim_date_rows,
+            fact_rows,
+        )
         logger.info("Loaded %d fact rows.", len(fact_rows))
     finally:
         conn.close()
@@ -190,13 +184,27 @@ with DAG(
     # Applies to every task below: if ANY of them fails (at 3am, unattended),
     # notify_on_failure() posts to the webhook configured via ALERT_WEBHOOK_URL
     # instead of the failure only being visible next time someone opens the UI.
-    default_args={"on_failure_callback": notify_on_failure},
+    default_args={
+        "on_failure_callback": notify_on_failure,
+        "retries": 0,
+        "retry_exponential_backoff": True,
+    },
 ) as dag:
 
-    extract = PythonOperator(task_id="extract", python_callable=extract_task)
+    extract = PythonOperator(
+        task_id="extract",
+        python_callable=extract_task,
+        retries=2,
+        retry_delay=timedelta(seconds=30),
+    )
     validate = PythonOperator(task_id="validate", python_callable=validate_task)
     transform = PythonOperator(task_id="transform", python_callable=transform_task)
-    load = PythonOperator(task_id="load", python_callable=load_task)
+    load = PythonOperator(
+        task_id="load",
+        python_callable=load_task,
+        retries=2,
+        retry_delay=timedelta(seconds=30),
+    )
     cleanup = PythonOperator(task_id="cleanup", python_callable=cleanup_task)
 
     extract >> validate >> transform >> load >> cleanup

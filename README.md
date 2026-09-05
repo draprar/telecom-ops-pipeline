@@ -94,7 +94,8 @@ Star schema: one fact table, three dimensions.
 
 - `fact_work_orders` — one row per work order, with a `task_id` natural key (unique, upserted on
   reload for idempotency) and foreign keys into the dimensions below.
-- `dim_technician`, `dim_material`, `dim_date` — descriptive attributes, deduplicated on load.
+- `dim_technician` and `dim_material` — descriptive attributes, upserted as SCD1 (`region` /
+  `hire_date` / `unit_cost` update in place on reload). `dim_date` is insert-only.
 
 ## Getting started
 
@@ -200,8 +201,8 @@ Every push to `main` (and every pull request targeting `main`) runs, via GitHub 
 2. **`dag-validation`** — imports the DAG with Airflow 2.10 (constrained) and checks that
    `telecom_ops_etl` loads with the expected five tasks
 3. **`integration-test`** — builds the Docker image, spins up Postgres + app, fails if the
-   app container exits non-zero, and verifies row counts directly in the database before
-   tearing everything down
+   app container exits non-zero, verifies row counts in the database, then runs the pipeline
+   a second time and asserts the fact count did not double (upsert)
 
 ## Design decisions & known simplifications
 
@@ -218,6 +219,17 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   pipeline immediately, since those aren't something a quarantine table can fix. If a
   material's task was itself quarantined, the material cascades into quarantine too, even if
   it individually passed validation, since it would otherwise have nothing valid to attach to.
+  A CRM technician who is not in the HR logs is treated the same way as a missing name: the
+  task is quarantined rather than loaded with a NULL `technician_id`. Invalid dates, non-numeric
+  material quantities, and negative costs are also row-level (a bad material does not take
+  sibling materials for the same task with it).
+- **Dimensions follow SCD1 except `dim_date`.** Reloading source data overwrites `dim_technician.region` /
+  `hire_date` and `dim_material.unit_cost`. Calendar dates are immutable, so `dim_date` stays
+  insert-only (`ON CONFLICT DO NOTHING`).
+- **DAG cleanup deletes staging only after a successful load.** A failed run leaves
+  `data/staging/<run_id>/` in place for debugging. Quarantine files live outside staging and
+  are never removed by cleanup. Extract and load retry twice with exponential backoff; validate,
+  transform, and cleanup do not.
 - **Schema changes go through Alembic, with real "before/after" migrations.** The very first
   version of `fact_work_orders.task_id` had no `UNIQUE` constraint, which was added later by hand
   via `psql` once the upsert logic in `load_facts()` needed something to `ON CONFLICT` against —
