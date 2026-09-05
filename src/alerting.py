@@ -6,11 +6,10 @@ the payload shape ("discord" or "slack"), ALERT_WEBHOOK_URL is the webhook
 URL itself. Swapping providers is a .env change, not a code change - the
 two payload shapes are the only thing that differs between them.
 
-A failing alert must never make DAG failure handling fail further: every
-exception in notify_on_failure() is caught and logged, never re-raised.
-Airflow calls on_failure_callback functions as part of its own failure
-handling, so an unhandled exception here would compound the original
-failure instead of just reporting it.
+A failing alert must never make DAG failure handling fail further. Failures
+while reading the Airflow context or sending the webhook are caught and
+logged, never re-raised. The exception message is not logged: requests
+embeds the webhook URL (the secret) in both the message and the traceback.
 """
 
 import logging
@@ -24,6 +23,17 @@ ALERT_WEBHOOK_URL_ENV = "ALERT_WEBHOOK_URL"
 ALERT_WEBHOOK_TYPE_ENV = "ALERT_WEBHOOK_TYPE"
 DEFAULT_WEBHOOK_TYPE = "discord"
 REQUEST_TIMEOUT_SECONDS = 10
+
+# Context lookup errors + JSON encoding + the requests hierarchy (HTTP,
+# connection, timeout). Not a bare Exception: programming errors in this
+# module should still surface instead of being swallowed for a green CI.
+_ALERT_SEND_ERRORS = (
+    KeyError,
+    AttributeError,
+    TypeError,
+    ValueError,
+    requests.RequestException,
+)
 
 
 def _build_message(context: dict) -> str:
@@ -51,8 +61,27 @@ def _build_payload(message: str, webhook_type: str) -> dict:
     return {"content": message}
 
 
+def _log_alert_send_failure(webhook_type: str, exc: BaseException) -> None:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is not None:
+        logger.error(
+            "Failed to send failure alert via %s webhook (%s, HTTP %s) "
+            "- continuing without raising.",
+            webhook_type,
+            type(exc).__name__,
+            status,
+        )
+        return
+    logger.error(
+        "Failed to send failure alert via %s webhook (%s) "
+        "- continuing without raising.",
+        webhook_type,
+        type(exc).__name__,
+    )
+
+
 def notify_on_failure(context: dict) -> None:
-    """on_failure_callback entry point. Never raises."""
+    """on_failure_callback entry point. Does not re-raise alert-path errors."""
     webhook_url = os.getenv(ALERT_WEBHOOK_URL_ENV)
     if not webhook_url:
         logger.info(
@@ -68,5 +97,5 @@ def notify_on_failure(context: dict) -> None:
         response = requests.post(webhook_url, json=payload, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
         logger.info("Sent failure alert via %s webhook.", webhook_type)
-    except Exception:
-        logger.exception("Failed to send failure alert - continuing without raising.")
+    except _ALERT_SEND_ERRORS as exc:
+        _log_alert_send_failure(webhook_type, exc)

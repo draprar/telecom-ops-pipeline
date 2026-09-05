@@ -87,6 +87,7 @@ def run():
     except Exception:
         logger.exception("Pipeline run failed, rolling back")
         conn.rollback()
+        raise
     finally:
         conn.close()
 

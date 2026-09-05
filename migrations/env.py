@@ -1,5 +1,6 @@
 import os
 from logging.config import fileConfig
+from urllib.parse import quote_plus
 
 from alembic import context
 from dotenv import load_dotenv
@@ -28,12 +29,14 @@ def _database_url() -> str:
     one place that needs to agree with the rest of the app on how to find
     the database."""
     load_dotenv()
-    user = os.getenv("POSTGRES_USER")
-    password = os.getenv("POSTGRES_PASSWORD")
+    user = quote_plus(os.getenv("POSTGRES_USER") or "")
+    password = quote_plus(os.getenv("POSTGRES_PASSWORD") or "")
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "5432")
-    dbname = os.getenv("POSTGRES_DB")
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
+    dbname = os.getenv("POSTGRES_DB") or ""
+    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
+    # ConfigParser interpolates %; quote_plus emits %XX so escape for Alembic.
+    return url.replace("%", "%%")
 
 
 config.set_main_option("sqlalchemy.url", _database_url())

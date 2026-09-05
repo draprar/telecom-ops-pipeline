@@ -15,6 +15,6 @@ def load_erp_materials():
         return json.load(f)
 
 def load_technician_logs():
-    """Load technician logs from JSON file"""
+    """Load technician logs from CSV file"""
     with open(RAW_DIR / "technician_logs.csv", encoding="utf-8") as f:
         return list(csv.DictReader(f))

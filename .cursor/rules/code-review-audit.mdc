@@ -1,0 +1,81 @@
+---
+description: Pełny audyt projektu telecom-ops-pipeline z perspektywy code review
+alwaysApply: false
+---
+
+# Rola
+
+Działaj jako senior data engineer robiący dokładny code review tego pipeline'u ETL (Python/Airflow/PostgreSQL/Docker). Najpierw przygotuj raport i plan poprawek — nie edytuj plików, dopóki plan nie zostanie zaakceptowany.
+
+# Zanim zaczniesz
+
+Przeczytaj całe `README.md`, zwłaszcza sekcję **"Design decisions & known simplifications"**. Dokumentuje ona kilka świadomych kompromisów (walidacja typu kwarantanna-zamiast-fail-fast, dwuetapowa historia migracji Alembic, jeden materiał na fakt, staging w JSON zamiast Parquet, podwójne podejście do połączenia z DB między DAG-iem a samodzielnym skryptem, tryb standalone Airflow, alerting wyłącznie przez webhook z wąskim `except` na ścieżce wysyłki — nie goły `Exception`). **Nie zgłaszaj żadnego z nich jako błędu.** Jeśli jakieś ustalenie pokrywa się z udokumentowanym kompromisem, albo je pomiń, albo wypisz raz w osobnej linii "Potwierdzone znane ograniczenia" — nigdy jako pozycję w Findings.
+
+# Zakres audytu
+
+Oceń projekt względem poniższych kategorii. Jeśli w danej kategorii nie ma zastrzeżeń, napisz "OK, brak uwag" — nie wymyślaj problemów na siłę.
+
+1. **Poprawność pipeline'u i idempotentność**
+   - Logika upsert na `task_id` (`fact_work_orders`) — rzeczywiście idempotentna przy ponownych uruchomieniach?
+   - Kaskada kwarantanny (materiał, którego task trafił do kwarantanny, powinien również do niej trafić) — poprawnie zaimplementowana wszędzie tam, gdzie powinna?
+   - Błędy walidacji na poziomie wiersza vs błędy systemowe (niedostępna baza, brak pliku źródłowego) — poprawnie rozdzielone?
+
+2. **Projekt DAG-a Airflow** (`dags/etl_pipeline_dag.py`)
+   - Zależności między taskami, konfiguracja retries/backoff
+   - Podpięcie `on_failure_callback` przez `default_args` — działa dla każdego taska zgodnie z zamierzeniem?
+   - Staging plikowy między taskami vs XCom — czy jakiś plik staging zostaje nieusunięty przy błędzie?
+   - `PostgresHook` (DAG) vs `.env`/`os.getenv()` (samodzielny skrypt) — spójne w obrębie każdej ze ścieżek, bez przypadkowego mieszania?
+
+3. **Baza danych i migracje**
+   - Symetria `upgrade()`/`downgrade()` w Alembicu — czy `downgrade` faktycznie czysto cofa `upgrade`?
+   - Surowy SQL w `load.py` — wyłącznie zapytania parametryzowane, brak SQL budowanego przez sklejanie stringów (ryzyko injection, bo nie ma ORM-a)?
+   - Rozjazd między `sql/schema.sql` (tylko referencyjny) a `migrations/versions/` — czy komentarz "reference only" jest wciąż aktualny?
+
+4. **Jakość kodu**
+   - Duplikacja, nazewnictwo, martwy kod, nieużywane importy
+   - Spójność z konwencjami `ruff` już wymuszanymi w CI
+
+5. **Obsługa błędów i jakość danych**
+   - Powody kwarantanny: kompletne i na tyle konkretne, żeby można było na ich podstawie działać?
+   - `src/alerting.py` — błędy ścieżki alerta (odczyt kontekstu Airflow, `requests.RequestException`, błędy JSON) przechwycone, zalogowane bez URL-a webhooka, nigdy nie re-raise'owane. Brak gołego `except Exception` jest celowy (bug w samym callbacku ma być widoczny). Zgodnie z README: zweryfikuj, że to wciąż prawda; nie "naprawiaj" tego catch-allem.
+
+6. **Bezpieczeństwo i sekrety**
+   - Coś w `.env.example`, co mogłoby wyciec do zacommitowanego `.env`?
+   - Obsługa URL-a webhooka — logowany gdzieś, gdzie nie powinien być?
+   - Docker: odsłonięte porty, domyślne dane logowania (np. flow hasła admina Airflow), sekrety zaszyte w obrazie vs przekazywane w runtime
+
+7. **Docker i CI/CD**
+   - Kolejność zależności serwisów w `docker-compose.yml` (`migrate` → `app`/`airflow` przez `service_completed_successfully`) — jakieś ryzyko race condition?
+   - `.github/workflows/ci.yml` — czy joby `unit-tests` i `integration-test` są rzeczywiście niezależne i sensowne (integration test weryfikuje realne liczby wierszy, nie tylko "kontener wystartował")?
+
+8. **Testy**
+   - Pokrycie jednostkowe `extract`, `validate`, `transform`, `load` w izolacji
+   - Test integracyjny — weryfikuje faktyczne wyniki (liczby wierszy, zachowanie upsert) czy tylko brak crasha?
+
+9. **Dokumentacja i spójność**
+   - Zgodność README z faktycznym kodem (ścieżki, zmienne środowiskowe, komendy)
+   - Jakiekolwiek TODO/FIXME pozostawione w kodzie — wypisz z lokalizacją
+
+# Format wyjścia
+
+## 1. Findings
+Pogrupowane wg kategorii powyżej. Dla każdej pozycji: **plik/linia**, **poziom istotności** (🔴 krytyczny / 🟡 średni / 🟢 kosmetyczny), **opis**, **sugerowana poprawka** (1–3 zdania).
+
+## 2. Potwierdzone znane ograniczenia
+Wszystko z Findings, co pokrywa się z udokumentowanymi kompromisami z README — wypisane tutaj zamiast jako błąd.
+
+## 3. Plan poprawek
+- **Faza 1 — szybkie wygrane**: poprawki niskim kosztem, wysoką wartością.
+- **Faza 2 — poprawki krytyczne**: problemy bezpieczeństwa/poprawności z realnym wpływem na dane lub użytkownika. Podaj szacowany nakład pracy (S/M/L) i co się zepsuje, jeśli to pominąć.
+- **Faza 3 — praca strukturalna**: większe refaktory, wyższe ryzyko, mogą wymagać osobnego brancha/PR-a.
+
+Odwołuj się do pozycji przez plik/linię, nie powtarzaj ich treści. Oznacz wszystko, co wymaga decyzji użytkownika (np. zmiana schematu tabeli faktów) zamiast po cichu wybierać domyślne rozwiązanie.
+
+## 4. Priorytety
+Krótka lista "Top 5", niezależna od podziału na fazy.
+
+# Wykonanie
+Nie edytuj plików po przedstawieniu planu. Czekaj na wyraźne potwierdzenie, które fazy wykonać, i wykonaj tylko to, co zostało zaakceptowane.
+
+# Powiązane dokumenty
+@README.md

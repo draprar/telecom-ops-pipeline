@@ -1,4 +1,7 @@
+import logging
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from alerting import notify_on_failure
 
@@ -61,13 +64,69 @@ def test_posts_slack_shaped_payload_when_configured(monkeypatch):
 def test_never_raises_when_the_http_call_itself_fails(monkeypatch):
     monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://discord.com/api/webhooks/fake")
 
-    with patch("alerting.requests.post", side_effect=ConnectionError("no network")):
+    with patch(
+        "alerting.requests.post",
+        side_effect=requests.ConnectionError("no network"),
+    ):
         notify_on_failure(_fake_context())  # must not raise
 
 
 def test_never_raises_when_webhook_returns_error_status(monkeypatch):
     monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://discord.com/api/webhooks/fake")
 
+    response = MagicMock()
+    response.status_code = 404
+    http_error = requests.HTTPError()
+    http_error.response = response
+
     with patch("alerting.requests.post") as mock_post:
-        mock_post.return_value.raise_for_status.side_effect = Exception("HTTP 404")
+        mock_post.return_value.raise_for_status.side_effect = http_error
         notify_on_failure(_fake_context())  # must not raise
+
+
+def test_never_raises_when_airflow_context_is_incomplete(monkeypatch):
+    monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://discord.com/api/webhooks/fake")
+
+    with patch("alerting.requests.post") as mock_post:
+        notify_on_failure({})  # KeyError from _build_message must not raise
+
+    mock_post.assert_not_called()
+
+
+def test_failure_log_does_not_include_webhook_url(monkeypatch, caplog):
+    webhook_url = "https://discord.com/api/webhooks/secret-token"
+    monkeypatch.setenv("ALERT_WEBHOOK_URL", webhook_url)
+
+    with (
+        patch(
+            "alerting.requests.post",
+            side_effect=requests.ConnectionError(
+                f"Failed to connect to {webhook_url}"
+            ),
+        ),
+        caplog.at_level(logging.ERROR, logger="alerting"),
+    ):
+        notify_on_failure(_fake_context())
+
+    assert webhook_url not in caplog.text
+    assert "ConnectionError" in caplog.text
+
+
+def test_http_error_log_includes_status_not_url(monkeypatch, caplog):
+    webhook_url = "https://discord.com/api/webhooks/secret-token"
+    monkeypatch.setenv("ALERT_WEBHOOK_URL", webhook_url)
+
+    response = MagicMock()
+    response.status_code = 404
+    http_error = requests.HTTPError()
+    http_error.response = response
+
+    with (
+        patch("alerting.requests.post") as mock_post,
+        caplog.at_level(logging.ERROR, logger="alerting"),
+    ):
+        mock_post.return_value.raise_for_status.side_effect = http_error
+        notify_on_failure(_fake_context())
+
+    assert webhook_url not in caplog.text
+    assert "HTTP 404" in caplog.text

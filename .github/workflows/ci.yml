@@ -86,7 +86,13 @@ jobs:
         run: docker compose up --build -d postgres app
 
       - name: Wait for app container to finish
-        run: docker wait telecom_ops_app
+        run: |
+          EXIT_CODE=$(docker wait telecom_ops_app)
+          echo "App container exit code: $EXIT_CODE"
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "Pipeline container failed"
+            exit "$EXIT_CODE"
+          fi
 
       - name: Show app logs
         if: always()
