@@ -1,0 +1,29 @@
+---
+description: Git i PR — agent nie commituje sam; na wyraźną prośbę tak
+alwaysApply: true
+---
+
+# Git
+
+Domyślnie **nie** wykonuj `git commit`, `git push`, tworzenia/aktualizacji PR, merge ani usuwania branchy.
+
+Przed pracą: `git status`, aktualny branch, ostatnie commity. Nie nadpisuj niezcommitowanych zmian użytkownika. Nie force-push, nie `--no-verify`, nie amend cudzego commita.
+
+- Jeśli projekt używa branchy zadaniowych: nie commituj na `main`/`master`; użyj istniejącego brancha albo utwórz jeden, gdy użytkownik o to prosi.
+- Wolno: `git status` / `diff` / `log`, zaproponować commit message w konwencji repo.
+
+## Gdy użytkownik wyraźnie każe commit / push / PR
+
+Wykonaj to (zgodnie z jego instrukcją i globalnymi zasadami Git). Nadal bez force-push, skip hooków i niszczenia historii, chyba że o to poprosi.
+
+## Domyślne zakończenie zadania
+
+Testy + lint → `git diff` / `status` → diff tylko o zadanie, bez artefaktów.
+
+Następnie:
+
+**GOTOWE DO COMMITA**
+
+Podaj: branch, wyniki testów i lint, krótki opis, sugerowany commit message, informację że commit nie został wykonany.
+
+Jeśli czegoś nie da się zweryfikować albo trzeba decyzji — nie oznaczaj jako gotowe.
