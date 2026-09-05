@@ -9,8 +9,8 @@ they never raise. This is documented in README under "Design decisions &
 known simplifications".
 """
 
-import json
-from pathlib import Path
+SOURCE_CRM_TASKS = "crm_tasks"
+SOURCE_ERP_MATERIALS = "erp_materials"
 
 
 def split_tasks(tasks, task_errors):
@@ -18,7 +18,7 @@ def split_tasks(tasks, task_errors):
 
     `quarantined_tasks` is a list of {"record": ..., "errors": [...]}
     dicts — one entry per flagged source row, including every duplicate
-    `task_id`, so the review file matches what was excluded from load.
+    `task_id`, so the review table matches what was excluded from load.
     """
     errors_by_task = {}
     for task_id, message in task_errors:
@@ -60,24 +60,3 @@ def split_materials(materials, material_errors, clean_task_ids):
         else:
             clean.append(row)
     return clean, quarantined
-
-
-def write_quarantine_file(path: Path, quarantined_tasks, quarantined_materials) -> None:
-    """Persist quarantined records to disk for manual review.
-
-    Callers are expected to write this OUTSIDE the per-run staging
-    directory (which gets deleted after a successful run) so quarantine
-    records actually survive to be looked at.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "quarantined_tasks": quarantined_tasks,
-                "quarantined_materials": quarantined_materials,
-            },
-            indent=2,
-            default=str,
-        ),
-        encoding="utf-8",
-    )

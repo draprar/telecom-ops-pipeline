@@ -2,7 +2,7 @@ import logging
 
 from pipeline import (
     build_warehouse_rows,
-    persist_quarantine,
+    log_quarantine_summary,
     sanitize_run_id,
     split_extracted,
 )
@@ -76,23 +76,19 @@ def test_split_extracted_quarantines_unknown_technician():
     assert q_materials[0]["errors"]
 
 
-def test_persist_quarantine_skips_file_when_empty(tmp_path, caplog):
+def test_log_quarantine_summary_when_empty(caplog):
     with caplog.at_level(logging.INFO, logger="pipeline"):
-        path = persist_quarantine(tmp_path, "run1", [], [])
-    assert path is None
-    assert list(tmp_path.iterdir()) == []
+        log_quarantine_summary([], [])
     assert "No validation issues found" in caplog.text
 
 
-def test_persist_quarantine_writes_json(tmp_path):
-    path = persist_quarantine(
-        tmp_path,
-        "run1",
-        [{"record": {"task_id": "1"}, "errors": ["bad"]}],
-        [],
-    )
-    assert path == tmp_path / "run1.json"
-    assert path.exists()
+def test_log_quarantine_summary_when_rows_present(caplog):
+    with caplog.at_level(logging.WARNING, logger="pipeline"):
+        log_quarantine_summary(
+            [{"record": {"task_id": "1"}, "errors": ["bad"]}],
+            [],
+        )
+    assert "Quarantined 1 task(s) and 0 material row(s)" in caplog.text
 
 
 def test_build_warehouse_rows_delegates_to_transform():

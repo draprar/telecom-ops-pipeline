@@ -2,6 +2,9 @@ import os
 
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2.extras import Json
+
+from quarantine import SOURCE_CRM_TASKS, SOURCE_ERP_MATERIALS
 
 load_dotenv()
 
@@ -113,6 +116,81 @@ def replace_material_lines(cur, material_lines, material_map, batch_task_ids):
                 row["line_cost"],
             ),
         )
+
+
+def _task_id_text(record):
+    if not isinstance(record, dict) or record.get("task_id") is None:
+        return None
+    text = str(record["task_id"]).strip()
+    return text or None
+
+
+def load_quarantine_records(cur, pipeline_run_id, quarantined_tasks, quarantined_materials):
+    """Insert DQ rows for this run. Does not commit."""
+    rows = [
+        (SOURCE_CRM_TASKS, entry) for entry in quarantined_tasks
+    ] + [
+        (SOURCE_ERP_MATERIALS, entry) for entry in quarantined_materials
+    ]
+    for source_system, entry in rows:
+        record = entry.get("record") or {}
+        errors = list(entry.get("errors") or [])
+        cur.execute(
+            """
+            INSERT INTO quarantine_records
+                (pipeline_run_id, source_system, task_id, source_row, errors)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                pipeline_run_id,
+                source_system,
+                _task_id_text(record),
+                Json(record),
+                errors,
+            ),
+        )
+
+
+def commit_quarantine_records(
+    conn, pipeline_run_id, quarantined_tasks, quarantined_materials
+):
+    """Commit the DQ table in its own transaction, before star load."""
+    if not quarantined_tasks and not quarantined_materials:
+        return
+    try:
+        with conn.cursor() as cur:
+            load_quarantine_records(
+                cur, pipeline_run_id, quarantined_tasks, quarantined_materials
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def load_pipeline(
+    conn,
+    pipeline_run_id,
+    quarantined_tasks,
+    quarantined_materials,
+    dim_technician_rows,
+    dim_material_rows,
+    dim_date_rows,
+    fact_rows,
+    material_lines,
+):
+    """Commit quarantine first, then load dimensions and facts."""
+    commit_quarantine_records(
+        conn, pipeline_run_id, quarantined_tasks, quarantined_materials
+    )
+    load_star_schema(
+        conn,
+        dim_technician_rows,
+        dim_material_rows,
+        dim_date_rows,
+        fact_rows,
+        material_lines,
+    )
 
 
 def load_star_schema(

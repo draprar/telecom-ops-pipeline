@@ -49,3 +49,19 @@ CREATE TABLE fact_work_order_materials (
     line_cost NUMERIC(10,2) NOT NULL,
     UNIQUE (task_id, material_id)
 );
+
+CREATE TABLE quarantine_records (
+    quarantine_id SERIAL PRIMARY KEY,
+    loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    pipeline_run_id VARCHAR(200) NOT NULL,
+    source_system VARCHAR(32) NOT NULL,
+    task_id VARCHAR(64),
+    source_row JSONB NOT NULL,
+    errors TEXT[] NOT NULL
+);
+
+CREATE INDEX ix_quarantine_records_pipeline_run_id
+    ON quarantine_records (pipeline_run_id);
+
+CREATE INDEX ix_quarantine_records_source_task
+    ON quarantine_records (source_system, task_id);

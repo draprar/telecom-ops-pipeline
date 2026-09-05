@@ -1,6 +1,4 @@
-import json
-
-from quarantine import split_materials, split_tasks, write_quarantine_file
+from quarantine import split_materials, split_tasks
 
 
 def test_split_tasks_keeps_clean_rows():
@@ -96,16 +94,3 @@ def test_split_materials_quarantines_only_the_flagged_row():
 
     assert clean == [materials[0]]
     assert quarantined[0]["record"] == materials[1]
-
-
-def test_write_quarantine_file_creates_parent_dir_and_valid_json(tmp_path):
-    path = tmp_path / "nested" / "run123.json"
-    quarantined_tasks = [{"record": {"task_id": "1"}, "errors": ["bad"]}]
-    quarantined_materials = [{"record": {"task_id": "2"}, "errors": ["worse"]}]
-
-    write_quarantine_file(path, quarantined_tasks, quarantined_materials)
-
-    assert path.exists()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["quarantined_tasks"] == quarantined_tasks
-    assert data["quarantined_materials"] == quarantined_materials

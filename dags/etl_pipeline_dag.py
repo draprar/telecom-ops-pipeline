@@ -13,10 +13,10 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from alerting import notify_on_failure
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
-from load import load_star_schema
+from load import load_pipeline
 from pipeline import (
     build_warehouse_rows,
-    persist_quarantine,
+    log_quarantine_summary,
     sanitize_run_id,
     split_extracted,
 )
@@ -26,9 +26,6 @@ from pipeline import (
 logger = logging.getLogger(__name__)
 
 STAGING_ROOT = Path(__file__).resolve().parent.parent / "data" / "staging"
-# Deliberately OUTSIDE the staging dir: cleanup_task deletes the staging dir
-# after every run, but quarantine records need to survive for manual review.
-QUARANTINE_ROOT = Path(__file__).resolve().parent.parent / "data" / "quarantine"
 
 # The Connection with this ID is defined via the AIRFLOW_CONN_POSTGRES_DEFAULT
 # env var in docker-compose.yml, not via os.getenv()/load.py like the
@@ -83,12 +80,7 @@ def validate_task(ti, **kwargs):
     clean_tasks, clean_materials, quarantined_tasks, quarantined_materials = split_extracted(
         tasks, materials, tech_logs
     )
-    persist_quarantine(
-        QUARANTINE_ROOT,
-        _run_slug(ti),
-        quarantined_tasks,
-        quarantined_materials,
-    )
+    log_quarantine_summary(quarantined_tasks, quarantined_materials)
 
     staging_dir = _staging_dir(ti.run_id)
     ti.xcom_push(
@@ -98,6 +90,17 @@ def validate_task(ti, **kwargs):
     ti.xcom_push(
         key="clean_materials_path",
         value=_write_json(staging_dir / "clean_materials.json", clean_materials),
+    )
+    # Staging only — Postgres quarantine_records is the review store, written at load.
+    ti.xcom_push(
+        key="quarantine_path",
+        value=_write_json(
+            staging_dir / "quarantine.json",
+            {
+                "quarantined_tasks": quarantined_tasks,
+                "quarantined_materials": quarantined_materials,
+            },
+        ),
     )
 
 
@@ -139,6 +142,7 @@ def load_task(ti, **kwargs):
     dim_date_rows = _read_json(ti.xcom_pull(key="dim_date_path", task_ids="transform"))
     fact_rows = _read_json(ti.xcom_pull(key="fact_rows_path", task_ids="transform"))
     material_lines = _read_json(ti.xcom_pull(key="material_lines_path", task_ids="transform"))
+    quarantine = _read_json(ti.xcom_pull(key="quarantine_path", task_ids="validate"))
 
     # Airflow-native connection lookup instead of os.getenv()/load_dotenv():
     # the credentials live in an Airflow Connection (here defined via the
@@ -148,8 +152,11 @@ def load_task(ti, **kwargs):
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     conn = hook.get_conn()
     try:
-        load_star_schema(
+        load_pipeline(
             conn,
+            _run_slug(ti),
+            quarantine.get("quarantined_tasks") or [],
+            quarantine.get("quarantined_materials") or [],
             dim_technician_rows,
             dim_material_rows,
             dim_date_rows,
@@ -166,8 +173,11 @@ def load_task(ti, **kwargs):
 
 
 def cleanup_task(ti, **kwargs):
-    """Remove the staging folder after a successful run. Quarantine records
-    live in QUARANTINE_ROOT, outside the staging dir, so they survive this."""
+    """Remove the staging folder after a successful run.
+
+    Quarantine review lives in Postgres (committed before star load), so
+    deleting staging JSON after a successful load does not lose DQ rows.
+    """
     staging_dir = STAGING_ROOT / _run_slug(ti)
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
