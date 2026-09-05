@@ -79,7 +79,10 @@ services:
       # not a row in the metadata DB, so it's not editable from the
       # Connections page - changing it means changing this env var (and
       # restarting the container), not touching DAG code either way.
-      AIRFLOW_CONN_POSTGRES_DEFAULT: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${DB_PORT}/${POSTGRES_DB}"
+      # JSON form so a password containing @, :, or % is not parsed as URI
+      # syntax. Compose still interpolates ${POSTGRES_PASSWORD}; a quote or
+      # backslash in the password would still need to be escaped in .env.
+      AIRFLOW_CONN_POSTGRES_DEFAULT: '{"conn_type": "postgres", "login": "${POSTGRES_USER}", "password": "${POSTGRES_PASSWORD}", "host": "postgres", "port": ${DB_PORT}, "schema": "${POSTGRES_DB}"}'
     ports:
       - "8080:8080"
     volumes:
