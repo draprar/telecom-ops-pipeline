@@ -118,6 +118,7 @@ jobs:
           fi
           echo "FACT_COUNT=$COUNT" >> "$GITHUB_ENV"
           echo "LINE_COUNT=$LINES" >> "$GITHUB_ENV"
+          docker exec telecom_ops_db psql -U telecom_admin -d telecom_ops -c "SELECT COUNT(*) FROM quarantine_records;"
 
       - name: Re-run pipeline and verify upsert did not duplicate facts
         run: |

@@ -1,6 +1,7 @@
-import json
+from quarantine import split_materials, split_tasks
+from validate import validate_tasks
 
-from quarantine import split_materials, split_tasks, write_quarantine_file
+KNOWN_TECHNICIANS = {"Jan Kowalski"}
 
 
 def test_split_tasks_keeps_clean_rows():
@@ -51,6 +52,61 @@ def test_split_tasks_keeps_every_duplicate_source_row():
     assert all(entry["errors"] == ["Duplicate task ID found: 1"] for entry in quarantined)
 
 
+def test_split_tasks_quarantines_row_missing_task_id_key():
+    row = {
+        "technician_name": "Jan Kowalski",
+        "duration_minutes": "60",
+        "task_date": "2026-08-17",
+        "task_type": "repair",
+        "status": "completed",
+    }
+    task_errors = validate_tasks([row], KNOWN_TECHNICIANS)
+
+    clean, quarantined = split_tasks([row], task_errors)
+
+    assert clean == []
+    assert len(quarantined) == 1
+    assert quarantined[0]["record"] is row
+    assert any("Missing field task_id" in message for message in quarantined[0]["errors"])
+
+
+def test_split_tasks_quarantines_none_task_id():
+    row = {
+        "task_id": None,
+        "technician_name": "Jan Kowalski",
+        "duration_minutes": "60",
+        "task_date": "2026-08-17",
+        "task_type": "repair",
+        "status": "completed",
+    }
+    task_errors = validate_tasks([row], KNOWN_TECHNICIANS)
+
+    clean, quarantined = split_tasks([row], task_errors)
+
+    assert clean == []
+    assert len(quarantined) == 1
+    assert quarantined[0]["record"] is row
+
+
+def test_split_tasks_quarantines_empty_task_id():
+    row = {
+        "task_id": "",
+        "technician_name": "Jan Kowalski",
+        "duration_minutes": "60",
+        "task_date": "2026-08-17",
+        "task_type": "repair",
+        "status": "completed",
+    }
+    task_errors = validate_tasks([row], KNOWN_TECHNICIANS)
+
+    clean, quarantined = split_tasks([row], task_errors)
+
+    assert clean == []
+    assert len(quarantined) == 1
+    assert quarantined[0]["record"] is row
+    assert any("Invalid task_id format" in message for message in quarantined[0]["errors"])
+
+
 def test_split_materials_keeps_clean_rows():
     materials = [{"task_id": "1", "material_name": "cable"}]
     clean, quarantined = split_materials(materials, material_errors=[], clean_task_ids={"1"})
@@ -96,16 +152,3 @@ def test_split_materials_quarantines_only_the_flagged_row():
 
     assert clean == [materials[0]]
     assert quarantined[0]["record"] == materials[1]
-
-
-def test_write_quarantine_file_creates_parent_dir_and_valid_json(tmp_path):
-    path = tmp_path / "nested" / "run123.json"
-    quarantined_tasks = [{"record": {"task_id": "1"}, "errors": ["bad"]}]
-    quarantined_materials = [{"record": {"task_id": "2"}, "errors": ["worse"]}]
-
-    write_quarantine_file(path, quarantined_tasks, quarantined_materials)
-
-    assert path.exists()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["quarantined_tasks"] == quarantined_tasks
-    assert data["quarantined_materials"] == quarantined_materials

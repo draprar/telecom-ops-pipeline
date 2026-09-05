@@ -6,13 +6,11 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
 from extract import load_crm_tasks, load_erp_materials, load_technician_logs
-from load import get_connection, load_star_schema
+from load import get_connection, load_pipeline
 from logging_config import setup_logging
-from pipeline import build_warehouse_rows, persist_quarantine, split_extracted
+from pipeline import build_warehouse_rows, log_quarantine_summary, split_extracted
 
 logger = logging.getLogger(__name__)
-
-QUARANTINE_ROOT = Path(__file__).resolve().parent.parent / "data" / "quarantine"
 
 
 def run():
@@ -29,10 +27,8 @@ def run():
     clean_tasks, clean_materials, quarantined_tasks, quarantined_materials = split_extracted(
         tasks, materials, tech_logs
     )
-    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    persist_quarantine(
-        QUARANTINE_ROOT, run_timestamp, quarantined_tasks, quarantined_materials
-    )
+    log_quarantine_summary(quarantined_tasks, quarantined_materials)
+    pipeline_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     logger.info("Transforming data...")
     dim_technician_rows, dim_material_rows, dim_date_rows, fact_rows, material_lines = (
@@ -42,8 +38,11 @@ def run():
     logger.info("Loading data into database...")
     conn = get_connection()
     try:
-        load_star_schema(
+        load_pipeline(
             conn,
+            pipeline_run_id,
+            quarantined_tasks,
+            quarantined_materials,
             dim_technician_rows,
             dim_material_rows,
             dim_date_rows,
@@ -56,7 +55,7 @@ def run():
             len(material_lines),
         )
     except Exception:
-        logger.exception("Pipeline run failed, rolling back")
+        logger.exception("Pipeline run failed")
         raise
     finally:
         conn.close()

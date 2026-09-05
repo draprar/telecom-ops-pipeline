@@ -28,7 +28,7 @@ flowchart LR
     E --> V[Validate]
     V --> T[Transform]
     T --> L[Load]
-    L --> PG[(PostgreSQL<br/>star schema)]
+    L --> PG[(PostgreSQL<br/>star + quarantine)]
 ```
 
 Orchestration layer (Airflow DAG, one task per pipeline stage, with a file-based staging area
@@ -50,6 +50,7 @@ flowchart LR
 | Testing | pytest |
 | Linting | ruff |
 | Schema migrations | Alembic |
+| Staging (DAG) | Parquet via pyarrow |
 | CI/CD | GitHub Actions |
 
 ## Project structure
@@ -61,8 +62,7 @@ telecom-ops-pipeline/
 │   └── etl_pipeline_dag.py       # Airflow DAG (extract → validate → transform → load → cleanup)
 ├── data/
 │   ├── raw/                      # generated synthetic source files (gitignored)
-│   ├── staging/                  # per-run intermediate files used by the DAG (gitignored)
-│   └── quarantine/               # rows that failed validation, kept for review (gitignored)
+│   └── staging/                  # per-run intermediate files used by the DAG (gitignored)
 ├── scripts/
 │   ├── generate_fake_data.py     # synthetic data generator (Faker)
 │   └── run_pipeline.py           # standalone pipeline runner (used by the Docker app image)
@@ -80,6 +80,7 @@ telecom-ops-pipeline/
 │   ├── quarantine.py
 │   ├── transform.py
 │   ├── load.py
+│   ├── staging.py                # Parquet handoffs between Airflow tasks
 │   ├── logging_config.py
 │   └── alerting.py               # posts to a chat webhook on task failure (on_failure_callback)
 ├── tests/
@@ -98,6 +99,8 @@ Star schema: work-order facts, material-line facts, three dimensions.
   (`task_id` + `material_id` unique); quantity and line cost live here, not on the header.
 - `dim_technician` and `dim_material` — SCD1 (`region` / `hire_date` / `unit_cost`).
   `dim_date` is insert-only.
+- `quarantine_records` — append-only review queue for rows excluded from the star load
+  (`pipeline_run_id`, source system, original row as JSONB, error messages).
 
 ## Getting started
 
@@ -165,7 +168,11 @@ docker logs telecom_ops_app
 3. Enable and trigger the `telecom_ops_etl` DAG
 
 Both paths are idempotent — running either one multiple times on the same source data updates
-existing rows (matched by `task_id`) instead of duplicating them.
+existing rows (matched by `task_id`) instead of duplicating them. That upsert is a **last-good**
+contract: a task quarantined in this run is excluded from the load but does not delete a fact
+row loaded on a previous successful run, and a task absent from the source file is left in place
+too. A full source snapshot with delete-on-absence would need an explicit completeness gate and
+is intentionally out of scope here.
 
 ## Alerting
 
@@ -191,10 +198,12 @@ that it's skipping and returns, nothing else changes.
 pytest -v
 ```
 
-Unit tests cover `extract`, `validate`, `transform`, and `load` in isolation (no live database
-required). CI additionally runs a full integration test: builds the app image, starts Postgres,
-runs the real pipeline against a fresh database, and asserts that rows actually landed in
-`fact_work_orders`.
+Unit tests cover `extract`, `validate`, `transform`, `load`, `quarantine`, `pipeline`
+(validate/split orchestration), `staging` (Parquet handoffs), and `alerting` in isolation — no
+live database required. CI additionally runs **`dag-validation`** (DAG import and task graph)
+and a full **`integration-test`**: builds the app image, starts Postgres, runs the real pipeline
+against a fresh database, asserts row counts in facts and material lines, and re-runs the
+pipeline to verify upsert did not duplicate rows.
 
 ## CI/CD
 
@@ -213,26 +222,30 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 
 - **Validation quarantines bad rows instead of blocking the whole run.** A row that fails
   validation (e.g. a task with a zero `duration_minutes`, or a material pointing at a
-  non-existent task) is set aside in `data/quarantine/<run_id>.json` along with the reason(s)
-  it was flagged, and excluded from that run's load — the rest of the batch still loads
-  normally. This is a deliberate choice over failing the whole pipeline on any validation
-  error: at this data volume, a handful of malformed rows from one source system shouldn't
-  block the other 999 good ones. Quarantining is for row-level *data quality* problems only —
-  systemic failures (unreachable database, missing source file) still raise and stop the
-  pipeline immediately, since those aren't something a quarantine table can fix. If a
-  material's task was itself quarantined, the material cascades into quarantine too, even if
-  it individually passed validation, since it would otherwise have nothing valid to attach to.
-  A CRM technician who is not in the HR logs is treated the same way as a missing name: the
-  task is quarantined rather than loaded with a NULL `technician_id`. Invalid dates, non-numeric
-  material quantities, and negative costs are also row-level (a bad material does not take
-  sibling materials for the same task with it).
+  non-existent task) is written to `quarantine_records` in Postgres along with the reason(s)
+  it was flagged, and excluded from that run's star load — the rest of the batch still loads
+  normally. DQ is committed in its own transaction *before* the star schema load, so a later
+  fact failure does not lose the review queue. The DAG may park the same payload in staging
+  Parquet between `validate` and `load`; those files are transfer only and are deleted with the
+  rest of staging after a successful run — Postgres is the source of truth. This is a deliberate
+  choice over failing the whole pipeline on any validation error: at this data volume, a
+  handful of malformed rows from one source system shouldn't block the other 999 good ones.
+  Quarantining is for row-level *data quality* problems only — systemic failures (unreachable
+  database, missing source file) still raise and stop the pipeline immediately, since those
+  aren't something a quarantine table can fix. If a material's task was itself quarantined,
+  the material cascades into quarantine too, even if it individually passed validation, since
+  it would otherwise have nothing valid to attach to. A CRM technician who is not in the HR
+  logs is treated the same way as a missing name: the task is quarantined rather than loaded
+  with a NULL `technician_id`. Invalid dates, non-numeric material quantities, and negative
+  costs are also row-level (a bad material does not take sibling materials for the same task
+  with it). Quarantine rows are append-only per pipeline run (a reload adds another review
+  batch; it does not upsert away the previous one).
 - **Dimensions follow SCD1 except `dim_date`.** Reloading source data overwrites `dim_technician.region` /
   `hire_date` and `dim_material.unit_cost`. Calendar dates are immutable, so `dim_date` stays
   insert-only (`ON CONFLICT DO NOTHING`).
 - **DAG cleanup deletes staging only after a successful load.** A failed run leaves
   `data/staging/<run_id>/` in place for debugging. Airflow `run_id` values are sanitized
-  (`:` / `+` → `_`) so staging and quarantine paths are legal on Windows NTFS bind-mounts.
-  Quarantine files live outside staging and are never removed by cleanup. Extract and load
+  (`:` / `+` → `_`) so staging paths are legal on Windows NTFS bind-mounts. Extract and load
   retry twice with exponential backoff; validate, transform, and cleanup do not.
 - **Schema changes go through Alembic, with real "before/after" migrations.** The very first
   version of `fact_work_orders.task_id` had no `UNIQUE` constraint, which was added later by hand
@@ -246,11 +259,17 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   existing rows, which is the actual point of a migration tool over a "current state" SQL file.
   A later revision adds `fact_work_order_materials` and drops the collapsed material columns
   from `fact_work_orders`; existing fact rows cannot be exploded back into lines, so an
-  upgraded database needs a pipeline reload from source.
-- **JSON staging files, not Parquet.** The Airflow DAG passes data between tasks via small JSON
-  files rather than through XCom directly, to avoid XCom's size limits — a real pattern for
-  larger datasets. At this data volume, Parquet would be the natural next upgrade (smaller files,
-  preserved types) but wasn't necessary to prove the pattern.
+  upgraded database needs a pipeline reload from source. Another revision adds
+  `quarantine_records` for the DQ review queue.
+- **Parquet staging files between Airflow tasks, not XCom payloads.** The DAG passes
+  file paths through XCom and writes row batches to `data/staging/<run_id>/*.parquet`
+  via `src/staging.py` (pyarrow). That avoids XCom size limits and keeps column types
+  intact compared to JSON. An empty batch is a valid handoff (`write_rows([], …)` writes
+  a zero-row Parquet file); a missing staging file on read is a systemic failure and
+  raises `FileNotFoundError`, same as a missing raw source file in extract. The
+  standalone `scripts/run_pipeline.py` path stays in-memory — it does not need staging
+  files at this volume. `pyarrow` ships in `requirements.txt` and in the Airflow container
+  via `_PIP_ADDITIONAL_REQUIREMENTS` in `docker-compose.yml`.
 - **The DAG and the standalone script connect to Postgres two different ways, on purpose.**
   `dags/etl_pipeline_dag.py`'s `load_task` uses `PostgresHook(postgres_conn_id="postgres_default")`
   — Airflow's own mechanism for looking up database credentials by a Connection ID, rather than
@@ -283,9 +302,6 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 
 ## Possible next steps
 
-- Parquet instead of JSON for staging files
-- Quarantine records in a proper Postgres table instead of JSON files, so they're queryable
-  and can back a simple "data quality" dashboard instead of requiring someone to open a file
 - Kafka producer/consumer to demonstrate event-driven ingestion alongside the batch pipeline
 - Email alerting alongside (or instead of) the webhook, once a real SMTP relay is available
 - dbt for the transformation layer instead of hand-written SQL

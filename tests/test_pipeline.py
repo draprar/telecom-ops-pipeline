@@ -2,7 +2,7 @@ import logging
 
 from pipeline import (
     build_warehouse_rows,
-    persist_quarantine,
+    log_quarantine_summary,
     sanitize_run_id,
     split_extracted,
 )
@@ -76,23 +76,44 @@ def test_split_extracted_quarantines_unknown_technician():
     assert q_materials[0]["errors"]
 
 
-def test_persist_quarantine_skips_file_when_empty(tmp_path, caplog):
+def test_split_extracted_quarantines_bad_task_id_without_keyerror():
+    tasks = [
+        {
+            "technician_name": "Jan Kowalski",
+            "duration_minutes": "60",
+            "task_date": "2026-08-17",
+            "task_type": "repair",
+            "status": "completed",
+        }
+    ]
+    materials = []
+    tech_logs = [
+        {"technician_name": "Jan Kowalski", "region": "Gdansk", "hire_date": "2020-01-01"}
+    ]
+
+    clean_tasks, clean_materials, q_tasks, _q_materials = split_extracted(
+        tasks, materials, tech_logs
+    )
+
+    assert clean_tasks == []
+    assert clean_materials == []
+    assert len(q_tasks) == 1
+    assert any("Missing field task_id" in message for message in q_tasks[0]["errors"])
+
+
+def test_log_quarantine_summary_when_empty(caplog):
     with caplog.at_level(logging.INFO, logger="pipeline"):
-        path = persist_quarantine(tmp_path, "run1", [], [])
-    assert path is None
-    assert list(tmp_path.iterdir()) == []
+        log_quarantine_summary([], [])
     assert "No validation issues found" in caplog.text
 
 
-def test_persist_quarantine_writes_json(tmp_path):
-    path = persist_quarantine(
-        tmp_path,
-        "run1",
-        [{"record": {"task_id": "1"}, "errors": ["bad"]}],
-        [],
-    )
-    assert path == tmp_path / "run1.json"
-    assert path.exists()
+def test_log_quarantine_summary_when_rows_present(caplog):
+    with caplog.at_level(logging.WARNING, logger="pipeline"):
+        log_quarantine_summary(
+            [{"record": {"task_id": "1"}, "errors": ["bad"]}],
+            [],
+        )
+    assert "Quarantined 1 task(s) and 0 material row(s)" in caplog.text
 
 
 def test_build_warehouse_rows_delegates_to_transform():

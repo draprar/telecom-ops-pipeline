@@ -11,7 +11,8 @@ TASK_REQUIRED_FIELDS = (
 MATERIAL_REQUIRED_FIELDS = ("task_id", "material_name", "quantity", "unit_cost")
 
 
-def _task_id_label(row):
+def task_id_label(row):
+    """Stable key for grouping validation errors and quarantine splits."""
     if "task_id" not in row or row["task_id"] is None or str(row["task_id"]).strip() == "":
         return "<missing task_id>"
     return row["task_id"]
@@ -32,7 +33,7 @@ def validate_tasks(tasks, known_technician_names):
     seen_ids = set()
 
     for row in tasks:
-        task_id = _task_id_label(row)
+        task_id = task_id_label(row)
         missing = _missing_fields(row, TASK_REQUIRED_FIELDS)
         for field in missing:
             errors.append((task_id, f"Missing field {field} for task {task_id}"))
@@ -98,7 +99,7 @@ def validate_materials(materials, valid_task_ids):
     errors = []
     for index, row in enumerate(materials):
         missing = _missing_fields(row, MATERIAL_REQUIRED_FIELDS)
-        task_id = _task_id_label(row)
+        task_id = task_id_label(row)
         for field in missing:
             errors.append((index, f"Missing field {field} for material on task {task_id}"))
 

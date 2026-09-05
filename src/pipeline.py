@@ -6,9 +6,8 @@ owns validate → split → transform so those rules cannot drift.
 
 import logging
 import re
-from pathlib import Path
 
-from quarantine import split_materials, split_tasks, write_quarantine_file
+from quarantine import split_materials, split_tasks
 from transform import (
     build_dim_date,
     build_dim_material,
@@ -45,21 +44,17 @@ def split_extracted(tasks, materials, tech_logs):
     return clean_tasks, clean_materials, quarantined_tasks, quarantined_materials
 
 
-def persist_quarantine(quarantine_root: Path, file_stem: str, quarantined_tasks, quarantined_materials):
-    """Write a quarantine file when there is anything to review. Returns the path or None."""
+def log_quarantine_summary(quarantined_tasks, quarantined_materials):
+    """Log how many rows were set aside. Persistence is Postgres, at load time."""
     if not quarantined_tasks and not quarantined_materials:
         logger.info("No validation issues found.")
-        return None
+        return
 
-    path = quarantine_root / f"{file_stem}.json"
-    write_quarantine_file(path, quarantined_tasks, quarantined_materials)
     logger.warning(
-        "Quarantined %d task(s) and %d material row(s); details written to %s",
+        "Quarantined %d task(s) and %d material row(s); committing to Postgres before star load",
         len(quarantined_tasks),
         len(quarantined_materials),
-        path,
     )
-    return path
 
 
 def build_warehouse_rows(clean_tasks, clean_materials, tech_logs):
