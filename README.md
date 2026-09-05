@@ -118,7 +118,7 @@ cp .env.example .env
 python scripts/generate_fake_data.py
 
 # 4. Start the full stack (Postgres + migrate + app + Airflow)
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 The `migrate` service runs `alembic upgrade head` against Postgres and exits; `app` and `airflow`
@@ -152,7 +152,7 @@ variables `load.py` already uses, so there's nothing extra to configure locally 
 
 **One-off run** (via the `app` container, runs once and exits):
 ```bash
-docker-compose up --build -d app
+docker compose up --build -d app
 docker logs telecom_ops_app
 ```
 
@@ -195,10 +195,13 @@ runs the real pipeline against a fresh database, and asserts that rows actually 
 
 ## CI/CD
 
-Every push to `main` runs, via GitHub Actions:
+Every push to `main` (and every pull request targeting `main`) runs, via GitHub Actions:
 1. **`unit-tests`** — ruff lint + pytest (no external dependencies)
-2. **`integration-test`** — builds the Docker image, spins up Postgres + app, waits for the
-   pipeline to finish, and verifies row counts directly in the database before tearing everything down
+2. **`dag-validation`** — imports the DAG with Airflow 2.10 (constrained) and checks that
+   `telecom_ops_etl` loads with the expected five tasks
+3. **`integration-test`** — builds the Docker image, spins up Postgres + app, fails if the
+   app container exits non-zero, and verifies row counts directly in the database before
+   tearing everything down
 
 ## Design decisions & known simplifications
 
@@ -255,9 +258,12 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   noticed the next time someone happens to open the Airflow UI. Deliberately not email: Airflow
   standalone has no SMTP server configured, and adding one is a real chunk of extra infrastructure
   (a real mail relay or third-party SMTP credentials) for what a single webhook URL already
-  covers. The alert path is defensive on purpose — every exception inside `notify_on_failure()` is
-  caught and logged, never re-raised, since a broken webhook must never make the DAG's own failure
-  handling fail further. Verified against a real Airflow task failure locally (`airflow tasks test`
+  covers. The alert path is defensive on purpose — failures while reading the Airflow context or
+  sending the webhook (`KeyError` / `AttributeError` / `requests.RequestException`, plus JSON
+  encoding errors) are caught and logged, never re-raised, so a broken webhook cannot compound
+  the DAG's own failure handling. The exception text is not logged, because `requests` embeds
+  the webhook URL in it. Programming errors inside the callback itself are left to surface.
+  Verified against a real Airflow task failure locally (`airflow tasks test`
   with a deliberately unreachable database), not just with a mocked HTTP call in the unit tests.
 
 ## Possible next steps
