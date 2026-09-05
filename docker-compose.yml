@@ -70,7 +70,7 @@ services:
     environment:
       DB_HOST: postgres
       AIRFLOW_HOME: /opt/airflow
-      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv apache-airflow-providers-postgres==5.14.0"
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary python-dotenv apache-airflow-providers-postgres==5.14.0 pyarrow==17.0.0"
       # Airflow-native Connection for the DAG's load_task, instead of the
       # os.getenv()/.env read that scripts/run_pipeline.py still uses. This
       # is the standard env-var form of a Connection - Airflow resolves it

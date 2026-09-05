@@ -50,6 +50,7 @@ flowchart LR
 | Testing | pytest |
 | Linting | ruff |
 | Schema migrations | Alembic |
+| Staging (DAG) | Parquet via pyarrow |
 | CI/CD | GitHub Actions |
 
 ## Project structure
@@ -79,6 +80,7 @@ telecom-ops-pipeline/
 │   ├── quarantine.py
 │   ├── transform.py
 │   ├── load.py
+│   ├── staging.py                # Parquet handoffs between Airflow tasks
 │   ├── logging_config.py
 │   └── alerting.py               # posts to a chat webhook on task failure (on_failure_callback)
 ├── tests/
@@ -218,8 +220,8 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   it was flagged, and excluded from that run's star load — the rest of the batch still loads
   normally. DQ is committed in its own transaction *before* the star schema load, so a later
   fact failure does not lose the review queue. The DAG may park the same payload in staging
-  JSON between `validate` and `load`; that file is transfer only and is deleted with the rest
-  of staging after a successful run — Postgres is the source of truth. This is a deliberate
+  Parquet between `validate` and `load`; those files are transfer only and are deleted with the
+  rest of staging after a successful run — Postgres is the source of truth. This is a deliberate
   choice over failing the whole pipeline on any validation error: at this data volume, a
   handful of malformed rows from one source system shouldn't block the other 999 good ones.
   Quarantining is for row-level *data quality* problems only — systemic failures (unreachable
@@ -253,10 +255,12 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
   from `fact_work_orders`; existing fact rows cannot be exploded back into lines, so an
   upgraded database needs a pipeline reload from source. Another revision adds
   `quarantine_records` for the DQ review queue.
-- **JSON staging files, not Parquet.** The Airflow DAG passes data between tasks via small JSON
-  files rather than through XCom directly, to avoid XCom's size limits — a real pattern for
-  larger datasets. At this data volume, Parquet would be the natural next upgrade (smaller files,
-  preserved types) but wasn't necessary to prove the pattern.
+- **Parquet staging files between Airflow tasks, not XCom payloads.** The DAG passes
+  file paths through XCom and writes row batches to `data/staging/<run_id>/*.parquet`
+  via `src/staging.py` (pyarrow). That avoids XCom size limits and keeps column types
+  intact compared to JSON. The standalone `scripts/run_pipeline.py` path stays in-memory
+  — it does not need staging files at this volume. `pyarrow` ships in `requirements.txt`
+  and in the Airflow container via `_PIP_ADDITIONAL_REQUIREMENTS` in `docker-compose.yml`.
 - **The DAG and the standalone script connect to Postgres two different ways, on purpose.**
   `dags/etl_pipeline_dag.py`'s `load_task` uses `PostgresHook(postgres_conn_id="postgres_default")`
   — Airflow's own mechanism for looking up database credentials by a Connection ID, rather than
@@ -289,9 +293,6 @@ Documented honestly, since these are the kind of trade-offs worth being able to 
 
 ## Possible next steps
 
-- Parquet instead of JSON for staging files
-- Quarantine records in a proper Postgres table instead of JSON files, so they're queryable
-  and can back a simple "data quality" dashboard instead of requiring someone to open a file
 - Kafka producer/consumer to demonstrate event-driven ingestion alongside the batch pipeline
 - Email alerting alongside (or instead of) the webhook, once a real SMTP relay is available
 - dbt for the transformation layer instead of hand-written SQL

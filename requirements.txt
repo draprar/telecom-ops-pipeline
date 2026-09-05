@@ -3,3 +3,4 @@ python-dotenv
 alembic
 sqlalchemy
 requests
+pyarrow==17.0.0

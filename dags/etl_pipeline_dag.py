@@ -1,4 +1,3 @@
-import json
 import logging
 import shutil
 import sys
@@ -19,6 +18,12 @@ from pipeline import (
     log_quarantine_summary,
     sanitize_run_id,
     split_extracted,
+)
+from staging import (
+    read_quarantine_entries,
+    read_rows,
+    write_quarantine_entries,
+    write_rows,
 )
 
 # Do NOT call setup_logging() here - Airflow configures root logging itself
@@ -46,21 +51,12 @@ def _staging_dir(run_id: str) -> Path:
     return d
 
 
-def _write_json(path: Path, data) -> str:
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return str(path)
-
-
-def _read_json(path_str: str):
-    return json.loads(Path(path_str).read_text(encoding="utf-8"))
-
-
 def extract_task(ti, **kwargs):
     staging_dir = _staging_dir(ti.run_id)
 
-    tasks_path = _write_json(staging_dir / "tasks.json", load_crm_tasks())
-    materials_path = _write_json(staging_dir / "materials.json", load_erp_materials())
-    tech_logs_path = _write_json(staging_dir / "tech_logs.json", load_technician_logs())
+    tasks_path = write_rows(staging_dir / "tasks.parquet", load_crm_tasks())
+    materials_path = write_rows(staging_dir / "materials.parquet", load_erp_materials())
+    tech_logs_path = write_rows(staging_dir / "tech_logs.parquet", load_technician_logs())
 
     ti.xcom_push(key="tasks_path", value=tasks_path)
     ti.xcom_push(key="materials_path", value=materials_path)
@@ -73,9 +69,9 @@ def validate_task(ti, **kwargs):
     Only the clean subset is written back out for transform_task to
     consume - a bad row here no longer silently rides along to load_task.
     """
-    tasks = _read_json(ti.xcom_pull(key="tasks_path", task_ids="extract"))
-    materials = _read_json(ti.xcom_pull(key="materials_path", task_ids="extract"))
-    tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
+    tasks = read_rows(ti.xcom_pull(key="tasks_path", task_ids="extract"))
+    materials = read_rows(ti.xcom_pull(key="materials_path", task_ids="extract"))
+    tech_logs = read_rows(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
     clean_tasks, clean_materials, quarantined_tasks, quarantined_materials = split_extracted(
         tasks, materials, tech_logs
@@ -85,29 +81,31 @@ def validate_task(ti, **kwargs):
     staging_dir = _staging_dir(ti.run_id)
     ti.xcom_push(
         key="clean_tasks_path",
-        value=_write_json(staging_dir / "clean_tasks.json", clean_tasks),
+        value=write_rows(staging_dir / "clean_tasks.parquet", clean_tasks),
     )
     ti.xcom_push(
         key="clean_materials_path",
-        value=_write_json(staging_dir / "clean_materials.json", clean_materials),
+        value=write_rows(staging_dir / "clean_materials.parquet", clean_materials),
     )
     # Staging only — Postgres quarantine_records is the review store, written at load.
     ti.xcom_push(
-        key="quarantine_path",
-        value=_write_json(
-            staging_dir / "quarantine.json",
-            {
-                "quarantined_tasks": quarantined_tasks,
-                "quarantined_materials": quarantined_materials,
-            },
+        key="quarantine_tasks_path",
+        value=write_quarantine_entries(
+            staging_dir / "quarantine_tasks.parquet", quarantined_tasks
+        ),
+    )
+    ti.xcom_push(
+        key="quarantine_materials_path",
+        value=write_quarantine_entries(
+            staging_dir / "quarantine_materials.parquet", quarantined_materials
         ),
     )
 
 
 def transform_task(ti, **kwargs):
-    clean_tasks = _read_json(ti.xcom_pull(key="clean_tasks_path", task_ids="validate"))
-    clean_materials = _read_json(ti.xcom_pull(key="clean_materials_path", task_ids="validate"))
-    tech_logs = _read_json(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
+    clean_tasks = read_rows(ti.xcom_pull(key="clean_tasks_path", task_ids="validate"))
+    clean_materials = read_rows(ti.xcom_pull(key="clean_materials_path", task_ids="validate"))
+    tech_logs = read_rows(ti.xcom_pull(key="tech_logs_path", task_ids="extract"))
 
     staging_dir = _staging_dir(ti.run_id)
     dim_technician, dim_material, dim_date, fact_rows, material_lines = build_warehouse_rows(
@@ -116,33 +114,38 @@ def transform_task(ti, **kwargs):
 
     ti.xcom_push(
         key="dim_technician_path",
-        value=_write_json(staging_dir / "dim_technician.json", dim_technician),
+        value=write_rows(staging_dir / "dim_technician.parquet", dim_technician),
     )
     ti.xcom_push(
         key="dim_material_path",
-        value=_write_json(staging_dir / "dim_material.json", dim_material),
+        value=write_rows(staging_dir / "dim_material.parquet", dim_material),
     )
     ti.xcom_push(
         key="dim_date_path",
-        value=_write_json(staging_dir / "dim_date.json", dim_date),
+        value=write_rows(staging_dir / "dim_date.parquet", dim_date),
     )
     ti.xcom_push(
         key="fact_rows_path",
-        value=_write_json(staging_dir / "fact_rows.json", fact_rows),
+        value=write_rows(staging_dir / "fact_rows.parquet", fact_rows),
     )
     ti.xcom_push(
         key="material_lines_path",
-        value=_write_json(staging_dir / "material_lines.json", material_lines),
+        value=write_rows(staging_dir / "material_lines.parquet", material_lines),
     )
 
 
 def load_task(ti, **kwargs):
-    dim_technician_rows = _read_json(ti.xcom_pull(key="dim_technician_path", task_ids="transform"))
-    dim_material_rows = _read_json(ti.xcom_pull(key="dim_material_path", task_ids="transform"))
-    dim_date_rows = _read_json(ti.xcom_pull(key="dim_date_path", task_ids="transform"))
-    fact_rows = _read_json(ti.xcom_pull(key="fact_rows_path", task_ids="transform"))
-    material_lines = _read_json(ti.xcom_pull(key="material_lines_path", task_ids="transform"))
-    quarantine = _read_json(ti.xcom_pull(key="quarantine_path", task_ids="validate"))
+    dim_technician_rows = read_rows(ti.xcom_pull(key="dim_technician_path", task_ids="transform"))
+    dim_material_rows = read_rows(ti.xcom_pull(key="dim_material_path", task_ids="transform"))
+    dim_date_rows = read_rows(ti.xcom_pull(key="dim_date_path", task_ids="transform"))
+    fact_rows = read_rows(ti.xcom_pull(key="fact_rows_path", task_ids="transform"))
+    material_lines = read_rows(ti.xcom_pull(key="material_lines_path", task_ids="transform"))
+    quarantined_tasks = read_quarantine_entries(
+        ti.xcom_pull(key="quarantine_tasks_path", task_ids="validate")
+    )
+    quarantined_materials = read_quarantine_entries(
+        ti.xcom_pull(key="quarantine_materials_path", task_ids="validate")
+    )
 
     # Airflow-native connection lookup instead of os.getenv()/load_dotenv():
     # the credentials live in an Airflow Connection (here defined via the
@@ -155,8 +158,8 @@ def load_task(ti, **kwargs):
         load_pipeline(
             conn,
             _run_slug(ti),
-            quarantine.get("quarantined_tasks") or [],
-            quarantine.get("quarantined_materials") or [],
+            quarantined_tasks,
+            quarantined_materials,
             dim_technician_rows,
             dim_material_rows,
             dim_date_rows,
@@ -176,7 +179,7 @@ def cleanup_task(ti, **kwargs):
     """Remove the staging folder after a successful run.
 
     Quarantine review lives in Postgres (committed before star load), so
-    deleting staging JSON after a successful load does not lose DQ rows.
+    deleting staging Parquet after a successful load does not lose DQ rows.
     """
     staging_dir = STAGING_ROOT / _run_slug(ti)
     if staging_dir.exists():
